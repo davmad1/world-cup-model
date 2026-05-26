@@ -137,7 +137,7 @@ def main() -> None:
     print(f"\n2026 FIFA World Cup — SPI Prediction Model (n={args.n:,})")
     print("=" * 60)
     print("Model: Poisson xG + Dixon-Coles + ET + penalties")
-    print("NOTE: Group assignments are estimates — verify vs official draw.\n")
+    print("Groups sourced from openfootball/worldcup.json (official draw).\n")
 
     probs = run_simulation(args.n)
     print_results(probs)
