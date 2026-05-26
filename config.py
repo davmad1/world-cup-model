@@ -1,0 +1,170 @@
+"""
+config.py — Single source of truth for every tunable model parameter.
+
+This is our key advantage over PELE: every knob is here, documented,
+and easy to experiment with. Change a value, re-run simulate.py, see
+the effect immediately. Use explain.py --sensitivity to sweep a range.
+
+All parameters are grouped by subsystem with inline commentary.
+"""
+
+# ── Elo engine ────────────────────────────────────────────────────────────────
+
+# Base K-factor — how much each match moves ratings.
+# Higher = faster adaptation to recent form, lower = more stable long-term.
+# 538's club SPI used 40; PELE is slightly higher for WC weight.
+ELO_K_BASE: float = 40.0
+
+# Number of matches before a team leaves the "provisional" period.
+# During provisional, K is doubled to allow fast convergence from the 1500 prior.
+PROVISIONAL_MATCHES: int = 100
+
+# ── Home advantage components ─────────────────────────────────────────────────
+
+# Base Elo-point advantage for the home team on flat ground at sea level.
+# 75 → home team wins ~60% when teams are otherwise equal (empirical average).
+HOME_ADV_BASE: float = 75.0
+
+# Altitude (metres) below which the home bonus is negligible.
+# Above this, a nonlinear exponential kicker is applied.
+ALTITUDE_KNEE: float = 1_500.0
+
+# Altitude boost coefficient. Scales the exponential term above ALTITUDE_KNEE.
+# Calibrated so La Paz (~3 640 m) earns ~170 extra Elo points of HFA.
+ALTITUDE_COEFF: float = 60.0
+
+# Distance-based HFA: each 1 000 km the away team must travel adds this many
+# extra Elo points to the home advantage (capped at DISTANCE_CAP).
+DISTANCE_PER_1000KM: float = 10.0
+DISTANCE_CAP: float = 60.0
+
+# ── Match importance multipliers ──────────────────────────────────────────────
+# Applied to K when updating ratings. Friendlies matter less; WC matches most.
+# The strings are matched case-insensitively against the tournament name in
+# the Kaggle results CSV. Add or adjust rows here — no code changes needed.
+IMPORTANCE: dict[str, float] = {
+    "friendly":                        0.50,
+    "nations league":                  0.80,
+    "nations league qualification":    0.70,
+    "confederation cup":               1.10,
+    "confederations cup":              1.10,
+    "olympic":                         0.70,
+    "olympics":                        0.70,
+    # Regional qualifying
+    "qualification":                   1.00,   # default qualifier catch-all
+    "uefa euro qualification":         1.10,
+    "fifa world cup qualification":    1.30,
+    # Continental tournaments
+    "african cup of nations":          1.10,
+    "afc asian cup":                   1.10,
+    "concacaf gold cup":               1.00,
+    "copa america":                    1.20,
+    "copa américa":                    1.20,
+    "uefa euro":                       1.30,
+    "uefa european":                   1.30,
+    # World Cup
+    "fifa world cup":                  1.60,
+}
+# Fallback when no keyword matches
+IMPORTANCE_DEFAULT: float = 0.80
+
+# ── Elo-to-goals conversion ───────────────────────────────────────────────────
+
+# Global average goals per team per match (used as the baseline in xG formulas).
+LEAGUE_AVG: float = 1.40
+
+# Scale factor controlling how steeply Elo differences translate into
+# goal-scoring gaps. Lower = more upsets; higher = more deterministic.
+# 0.5 means a 400-Elo gap → ~e^0.5 ≈ 1.65× more goals scored than allowed.
+ELO_GOALS_SCALE: float = 0.50
+
+# Average Elo around which the off/def conversion is centred.
+# 1 500 = the initialisation prior for every team.
+ELO_AVG: float = 1_500.0
+
+# ── Match distribution ────────────────────────────────────────────────────────
+
+# Dixon-Coles joint-probability correction for low-scoring outcomes.
+# Negative = fewer 0-0 draws than pure Poisson; −0.13 fits international data.
+RHO: float = -0.13
+
+# Negative-binomial overdispersion parameter (0 = Poisson; higher = more
+# variance → more blowouts and more scoreless draws).
+# Calibrate automatically by running:  python build_ratings.py --calibrate
+OVERDISPERSION: float = 0.12
+
+# ── Player market values ──────────────────────────────────────────────────────
+
+# Transfermarkt systematically over-values players at UEFA clubs relative to
+# actual performance (PELE found ~30 %). Applied as a haircut to their listed
+# values before summing squad strength.
+UEFA_DISCOUNT: float = 0.30
+
+# Weight of starter vs. bench contribution to squad value.
+# Players ranked 1-11 by value get STARTER_WEIGHT; players 12-23 get a
+# linearly decreasing share down to BENCH_MIN_WEIGHT at slot 23.
+STARTER_WEIGHT: float = 1.00
+BENCH_MIN_WEIGHT: float = 0.10
+
+# Squad value mean-reversion blend with Elo (0 = pure Elo, 1 = pure squad value).
+# Phase 2 will tune this; 0.35 matches PELE's empirical ~25-point mean reversion.
+ELO_SQUAD_BLEND: float = 0.35
+
+# ── Age trajectory ────────────────────────────────────────────────────────────
+
+# Peak age for international players (market-value weighted).
+AGE_PEAK: float = 26.5
+
+# Annual Elo-point change per year away from peak.
+# A squad with weighted-avg age of 30 (3.5 years past peak) loses 14 points.
+AGE_ELO_PER_YEAR: float = 4.0
+
+# ── Tilt ratings ─────────────────────────────────────────────────────────────
+
+# Tactical tilt (residual goals vs. expectation) is very noisy in soccer.
+# Shrink it toward zero by this factor before adding to personnel tilt.
+TILT_TACTICAL_SHRINK: float = 0.20
+
+# How much a team's combined tilt scales the total expected goals in a match.
+# tilt_scalar = 1 + (tilt_a + tilt_b) × TILT_GOAL_IMPACT
+# Tilt values range roughly −0.15 to +0.15; impact of 0.5 → up to ±15 % total goals.
+TILT_GOAL_IMPACT: float = 0.50
+
+# ── Penalty shootout ──────────────────────────────────────────────────────────
+
+# Base success rate per kick (empirical international average ~74.5 %).
+PEN_BASE: float = 0.745
+
+# Maximum SPI-based adjustment (±pp). Better team kicks slightly more reliably.
+PEN_MAX_ADJ: float = 0.05
+
+# ── Simulation ───────────────────────────────────────────────────────────────
+
+# Default number of Monte Carlo tournament simulations.
+# 10 000 runs in ~6 s; 50 000 in ~30 s; 100 000 in ~60 s.
+N_SIMS: int = 10_000
+
+# Random seed (None = different results every run; set an int for reproducibility).
+RANDOM_SEED = None
+
+# ── Within-tournament "hot" simulation ───────────────────────────────────────
+
+# Mini K-factor applied after each simulated group-stage match within a single
+# tournament run. Captures momentum / form.  Set to 0 to disable.
+HOT_K: float = 10.0
+
+# ── Group-stage incentive modelling ──────────────────────────────────────────
+
+# xG adjustment (per team) on the final group matchday when both teams are
+# already safe (mutual-advance scenario) or both already eliminated.
+INCENTIVE_SAFE_XG_ADJ: float  = -0.50   # both safe   → fewer goals
+INCENTIVE_ELIM_XG_ADJ: float  =  0.50   # both out    → more goals
+
+# ── Fair play tiebreaker ──────────────────────────────────────────────────────
+
+# Expected yellow cards per team per match (negative binomial).
+CARDS_MEAN: float = 1.8
+CARDS_OVERDISPERSION: float = 0.8
+
+# Better teams (higher SPI) commit fewer fouls. Elo-point reduction per card.
+CARDS_ELO_SLOPE: float = 0.10

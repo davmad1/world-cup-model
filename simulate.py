@@ -25,6 +25,7 @@ from collections import defaultdict
 from tabulate import tabulate
 from tqdm import tqdm
 
+import config
 from model import win_probability
 from teams import TEAMS, spi, groups as get_groups
 from tournament import simulate_tournament
@@ -122,8 +123,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="2026 World Cup SPI prediction model (538-style)"
     )
-    parser.add_argument("-n", "--n", type=int, default=10_000,
-                        help="Number of Monte Carlo simulations (default: 10000)")
+    parser.add_argument("-n", "--n", type=int, default=config.N_SIMS,
+                        help=f"Number of Monte Carlo simulations (default: {config.N_SIMS})")
     parser.add_argument("--group-probs", action="store_true",
                         help="Print per-group advance probabilities")
     parser.add_argument("--matchup", nargs=2, metavar=("TEAM_A", "TEAM_B"),

@@ -25,16 +25,17 @@ from __future__ import annotations
 import numpy as np
 from scipy.stats import poisson as sp_poisson
 
-from teams import LEAGUE_AVG, spi
+import config
+from teams import spi
 
-RNG = np.random.default_rng()
+LEAGUE_AVG = config.LEAGUE_AVG   # re-exported for backwards compat
 
-# Dixon-Coles inflation parameter (negative → draws/0-0 slightly suppressed)
-RHO = -0.13
+RNG = np.random.default_rng(config.RANDOM_SEED)
 
-# Penalty base success rate and maximum SPI-based adjustment
-PEN_BASE = 0.745
-PEN_MAX_ADJ = 0.05
+# Dixon-Coles and penalty parameters come from config
+RHO         = config.RHO
+PEN_BASE    = config.PEN_BASE
+PEN_MAX_ADJ = config.PEN_MAX_ADJ
 
 
 # ── Expected goals ────────────────────────────────────────────────────────────

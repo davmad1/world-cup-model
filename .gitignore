@@ -1,0 +1,23 @@
+# Kaggle datasets — download manually (see README for links)
+data/*.csv
+data/*.json
+data/*.parquet
+
+# Keep the data directory itself
+!data/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+venv/
+.venv/
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp

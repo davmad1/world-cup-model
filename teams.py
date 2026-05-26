@@ -14,70 +14,73 @@ To refresh groups/schedule from the live data source run:
     python fetch_data.py --update-teams
 """
 
-LEAGUE_AVG = 1.40  # average xG per team per match in international football
+try:
+    from config import LEAGUE_AVG
+except ImportError:
+    LEAGUE_AVG = 1.40  # fallback if config not yet present
 
 # fmt: off
 TEAMS: dict[str, dict] = {
     # ── Group A: Mexico, South Africa, South Korea, Czech Republic ──
-    "Mexico":           {"off": 1.65, "def": 1.10, "group": "A"},
-    "South Africa":     {"off": 1.35, "def": 1.28, "group": "A"},
-    "South Korea":      {"off": 1.58, "def": 1.12, "group": "A"},
-    "Czech Republic":   {"off": 1.55, "def": 1.15, "group": "A"},
+    "Mexico":           {"off": 1.65, "def": 1.10, "group": "A", "tilt": 0.0},
+    "South Africa":     {"off": 1.35, "def": 1.28, "group": "A", "tilt": 0.0},
+    "South Korea":      {"off": 1.58, "def": 1.12, "group": "A", "tilt": 0.0},
+    "Czech Republic":   {"off": 1.55, "def": 1.15, "group": "A", "tilt": 0.0},
     # ── Group B: Canada, Bosnia & Herzegovina, Qatar, Switzerland ───
-    "Canada":           {"off": 1.62, "def": 1.12, "group": "B"},
-    "Bosnia & Herzegovina": {"off": 1.48, "def": 1.20, "group": "B"},
-    "Qatar":            {"off": 1.28, "def": 1.35, "group": "B"},
-    "Switzerland":      {"off": 1.65, "def": 1.02, "group": "B"},
+    "Canada":           {"off": 1.62, "def": 1.12, "group": "B", "tilt": 0.0},
+    "Bosnia & Herzegovina": {"off": 1.48, "def": 1.20, "group": "B", "tilt": 0.0},
+    "Qatar":            {"off": 1.28, "def": 1.35, "group": "B", "tilt": 0.0},
+    "Switzerland":      {"off": 1.65, "def": 1.02, "group": "B", "tilt": 0.0},
     # ── Group C: Brazil, Morocco, Haiti, Scotland ────────────────────
-    "Brazil":           {"off": 2.10, "def": 0.80, "group": "C"},
-    "Morocco":          {"off": 1.62, "def": 0.95, "group": "C"},
-    "Haiti":            {"off": 1.22, "def": 1.40, "group": "C"},
-    "Scotland":         {"off": 1.52, "def": 1.18, "group": "C"},
+    "Brazil":           {"off": 2.10, "def": 0.80, "group": "C", "tilt": 0.0},
+    "Morocco":          {"off": 1.62, "def": 0.95, "group": "C", "tilt": 0.0},
+    "Haiti":            {"off": 1.22, "def": 1.40, "group": "C", "tilt": 0.0},
+    "Scotland":         {"off": 1.52, "def": 1.18, "group": "C", "tilt": 0.0},
     # ── Group D: USA, Paraguay, Australia, Turkey ────────────────────
-    "USA":              {"off": 1.68, "def": 1.05, "group": "D"},
-    "Paraguay":         {"off": 1.48, "def": 1.18, "group": "D"},
-    "Australia":        {"off": 1.45, "def": 1.20, "group": "D"},
-    "Turkey":           {"off": 1.62, "def": 1.10, "group": "D"},
+    "USA":              {"off": 1.68, "def": 1.05, "group": "D", "tilt": 0.0},
+    "Paraguay":         {"off": 1.48, "def": 1.18, "group": "D", "tilt": 0.0},
+    "Australia":        {"off": 1.45, "def": 1.20, "group": "D", "tilt": 0.0},
+    "Turkey":           {"off": 1.62, "def": 1.10, "group": "D", "tilt": 0.0},
     # ── Group E: Germany, Curaçao, Ivory Coast, Ecuador ─────────────
-    "Germany":          {"off": 2.05, "def": 0.82, "group": "E"},
-    "Curaçao":          {"off": 1.15, "def": 1.45, "group": "E"},
-    "Ivory Coast":      {"off": 1.58, "def": 1.18, "group": "E"},
-    "Ecuador":          {"off": 1.52, "def": 1.15, "group": "E"},
+    "Germany":          {"off": 2.05, "def": 0.82, "group": "E", "tilt": 0.0},
+    "Curaçao":          {"off": 1.15, "def": 1.45, "group": "E", "tilt": 0.0},
+    "Ivory Coast":      {"off": 1.58, "def": 1.18, "group": "E", "tilt": 0.0},
+    "Ecuador":          {"off": 1.52, "def": 1.15, "group": "E", "tilt": 0.0},
     # ── Group F: Netherlands, Japan, Sweden, Tunisia ─────────────────
-    "Netherlands":      {"off": 1.88, "def": 0.95, "group": "F"},
-    "Japan":            {"off": 1.65, "def": 1.05, "group": "F"},
-    "Sweden":           {"off": 1.68, "def": 1.05, "group": "F"},
-    "Tunisia":          {"off": 1.38, "def": 1.22, "group": "F"},
+    "Netherlands":      {"off": 1.88, "def": 0.95, "group": "F", "tilt": 0.0},
+    "Japan":            {"off": 1.65, "def": 1.05, "group": "F", "tilt": 0.0},
+    "Sweden":           {"off": 1.68, "def": 1.05, "group": "F", "tilt": 0.0},
+    "Tunisia":          {"off": 1.38, "def": 1.22, "group": "F", "tilt": 0.0},
     # ── Group G: Belgium, Egypt, Iran, New Zealand ───────────────────
-    "Belgium":          {"off": 1.80, "def": 1.00, "group": "G"},
-    "Egypt":            {"off": 1.48, "def": 1.15, "group": "G"},
-    "Iran":             {"off": 1.45, "def": 1.18, "group": "G"},
-    "New Zealand":      {"off": 1.18, "def": 1.42, "group": "G"},
+    "Belgium":          {"off": 1.80, "def": 1.00, "group": "G", "tilt": 0.0},
+    "Egypt":            {"off": 1.48, "def": 1.15, "group": "G", "tilt": 0.0},
+    "Iran":             {"off": 1.45, "def": 1.18, "group": "G", "tilt": 0.0},
+    "New Zealand":      {"off": 1.18, "def": 1.42, "group": "G", "tilt": 0.0},
     # ── Group H: Spain, Cape Verde, Saudi Arabia, Uruguay ───────────
-    "Spain":            {"off": 2.15, "def": 0.78, "group": "H"},
-    "Cape Verde":       {"off": 1.28, "def": 1.35, "group": "H"},
-    "Saudi Arabia":     {"off": 1.42, "def": 1.22, "group": "H"},
-    "Uruguay":          {"off": 1.72, "def": 1.00, "group": "H"},
+    "Spain":            {"off": 2.15, "def": 0.78, "group": "H", "tilt": 0.0},
+    "Cape Verde":       {"off": 1.28, "def": 1.35, "group": "H", "tilt": 0.0},
+    "Saudi Arabia":     {"off": 1.42, "def": 1.22, "group": "H", "tilt": 0.0},
+    "Uruguay":          {"off": 1.72, "def": 1.00, "group": "H", "tilt": 0.0},
     # ── Group I: France, Senegal, Iraq, Norway ───────────────────────
-    "France":           {"off": 2.20, "def": 0.75, "group": "I"},
-    "Senegal":          {"off": 1.58, "def": 1.10, "group": "I"},
-    "Iraq":             {"off": 1.28, "def": 1.35, "group": "I"},
-    "Norway":           {"off": 1.82, "def": 1.05, "group": "I"},
+    "France":           {"off": 2.20, "def": 0.75, "group": "I", "tilt": 0.0},
+    "Senegal":          {"off": 1.58, "def": 1.10, "group": "I", "tilt": 0.0},
+    "Iraq":             {"off": 1.28, "def": 1.35, "group": "I", "tilt": 0.0},
+    "Norway":           {"off": 1.82, "def": 1.05, "group": "I", "tilt": 0.0},
     # ── Group J: Argentina, Algeria, Austria, Jordan ─────────────────
-    "Argentina":        {"off": 2.35, "def": 0.68, "group": "J"},
-    "Algeria":          {"off": 1.48, "def": 1.18, "group": "J"},
-    "Austria":          {"off": 1.62, "def": 1.10, "group": "J"},
-    "Jordan":           {"off": 1.28, "def": 1.35, "group": "J"},
+    "Argentina":        {"off": 2.35, "def": 0.68, "group": "J", "tilt": 0.0},
+    "Algeria":          {"off": 1.48, "def": 1.18, "group": "J", "tilt": 0.0},
+    "Austria":          {"off": 1.62, "def": 1.10, "group": "J", "tilt": 0.0},
+    "Jordan":           {"off": 1.28, "def": 1.35, "group": "J", "tilt": 0.0},
     # ── Group K: Portugal, DR Congo, Uzbekistan, Colombia ───────────
-    "Portugal":         {"off": 2.05, "def": 0.88, "group": "K"},
-    "DR Congo":         {"off": 1.42, "def": 1.25, "group": "K"},
-    "Uzbekistan":       {"off": 1.28, "def": 1.35, "group": "K"},
-    "Colombia":         {"off": 1.75, "def": 1.02, "group": "K"},
+    "Portugal":         {"off": 2.05, "def": 0.88, "group": "K", "tilt": 0.0},
+    "DR Congo":         {"off": 1.42, "def": 1.25, "group": "K", "tilt": 0.0},
+    "Uzbekistan":       {"off": 1.28, "def": 1.35, "group": "K", "tilt": 0.0},
+    "Colombia":         {"off": 1.75, "def": 1.02, "group": "K", "tilt": 0.0},
     # ── Group L: England, Croatia, Ghana, Panama ─────────────────────
-    "England":          {"off": 2.00, "def": 0.85, "group": "L"},
-    "Croatia":          {"off": 1.70, "def": 1.02, "group": "L"},
-    "Ghana":            {"off": 1.45, "def": 1.22, "group": "L"},
-    "Panama":           {"off": 1.30, "def": 1.32, "group": "L"},
+    "England":          {"off": 2.00, "def": 0.85, "group": "L", "tilt": 0.0},
+    "Croatia":          {"off": 1.70, "def": 1.02, "group": "L", "tilt": 0.0},
+    "Ghana":            {"off": 1.45, "def": 1.22, "group": "L", "tilt": 0.0},
+    "Panama":           {"off": 1.30, "def": 1.32, "group": "L", "tilt": 0.0},
 }
 # fmt: on
 
