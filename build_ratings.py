@@ -121,6 +121,88 @@ def patch_teams_py(
         print(f"\nteams.py updated.")
 
 
+# ── Tilt computation ─────────────────────────────────────────────────────────
+
+def compute_tilt(
+    df: pd.DataFrame,
+    ratings: dict[str, float],
+    current_teams: dict[str, dict],
+    n_recent: int = 60,
+) -> dict[str, float]:
+    """
+    Compute tactical tilt for each WC team from goal residuals.
+
+    For each team, look at its last *n_recent* matches. For each match compute
+    the ratio of actual total goals to expected total goals (based on current
+    Elo). Average these ratios, subtract 1, then shrink toward zero.
+
+    Positive tilt → team tends to be in higher-scoring games than expected.
+    Negative tilt → team tends to be in lower-scoring games than expected.
+    """
+    from elo import elo_to_off_def, normalise_name
+
+    tilts: dict[str, float] = {}
+
+    for team in current_teams:
+        elo_team = ratings.get(team)
+        if elo_team is None:
+            tilts[team] = 0.0
+            continue
+
+        # Filter matches where this team appeared under any of its names
+        def _is_team(raw: str) -> bool:
+            return normalise_name(raw) == team
+
+        mask = (
+            df["home_team"].apply(_is_team) | df["away_team"].apply(_is_team)
+        )
+        team_matches = df[mask].sort_values("date").tail(n_recent)
+
+        if len(team_matches) < 15:
+            tilts[team] = 0.0
+            continue
+
+        residuals = []
+        for _, row in team_matches.iterrows():
+            home_name = normalise_name(str(row["home_team"]))
+            away_name = normalise_name(str(row["away_team"]))
+            if home_name is None or away_name is None:
+                continue
+            elo_h = ratings.get(home_name, 1500.0)
+            elo_a = ratings.get(away_name, 1500.0)
+            off_h, def_h = elo_to_off_def(elo_h)
+            off_a, def_a = elo_to_off_def(elo_a)
+            xg_h = off_h * (def_a / config.LEAGUE_AVG)
+            xg_a = off_a * (def_h / config.LEAGUE_AVG)
+            expected_total = xg_h + xg_a
+            actual_total   = int(row["home_score"]) + int(row["away_score"])
+            if expected_total > 0.1:
+                residuals.append(actual_total / expected_total - 1.0)
+
+        if residuals:
+            raw = sum(residuals) / len(residuals)
+            tilts[team] = round(raw * config.TILT_TACTICAL_SHRINK, 4)
+        else:
+            tilts[team] = 0.0
+
+    return tilts
+
+
+def patch_tilt(
+    current_teams: dict[str, dict],
+    tilts: dict[str, float],
+    src: str,
+) -> str:
+    """Apply tilt values into the teams.py source string; return updated src."""
+    for team, tilt_val in tilts.items():
+        if team not in current_teams:
+            continue
+        pattern     = rf'("{re.escape(team)}":\s*\{{[^}}]*?"tilt":\s*)-?[\d.]+'
+        replacement = rf'\g<1>{tilt_val}'
+        src = re.sub(pattern, replacement, src)
+    return src
+
+
 # ── Top-N display ─────────────────────────────────────────────────────────────
 
 def show_top(ratings: dict[str, float], n: int = 20) -> None:
@@ -201,6 +283,22 @@ def main() -> None:
 
     current_teams = load_current_teams()
     patch_teams_py(current_teams, ratings, dry_run=args.dry_run)
+
+    # Tilt computation
+    print("\nComputing tactical tilt …")
+    tilts = compute_tilt(df, ratings, current_teams)
+    non_zero = {t: v for t, v in tilts.items() if abs(v) > 0.001}
+    print(f"  {len(non_zero)} teams with non-zero tilt.")
+    if not args.dry_run:
+        src = TEAMS_PY.read_text()
+        src = patch_tilt(current_teams, tilts, src)
+        TEAMS_PY.write_text(src)
+        print("  Tilt values written to teams.py.")
+    else:
+        top_tilts = sorted(non_zero.items(), key=lambda kv: -abs(kv[1]))[:10]
+        print("  Top tilt values (dry run):")
+        for t, v in top_tilts:
+            print(f"    {t:<25} {v:+.4f}")
 
     # Summary stats for WC teams
     wc_elos = {t: ratings[t] for t in current_teams if t in ratings}

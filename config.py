@@ -78,8 +78,9 @@ LEAGUE_AVG: float = 1.40
 
 # Scale factor controlling how steeply Elo differences translate into
 # goal-scoring gaps. Lower = more upsets; higher = more deterministic.
-# 0.5 means a 400-Elo gap → ~e^0.5 ≈ 1.65× more goals scored than allowed.
-ELO_GOALS_SCALE: float = 0.50
+# 0.40 means a 400-Elo gap → e^0.40 ≈ 1.49× more goals scored than allowed.
+# Lowered from 0.50 after Phase 1 review showed too-wide SPI spread.
+ELO_GOALS_SCALE: float = 0.40
 
 # Average Elo around which the off/def conversion is centred.
 # 1 500 = the initialisation prior for every team.
@@ -93,8 +94,10 @@ RHO: float = -0.13
 
 # Negative-binomial overdispersion parameter (0 = Poisson; higher = more
 # variance → more blowouts and more scoreless draws).
-# Calibrate automatically by running:  python build_ratings.py --calibrate
-OVERDISPERSION: float = 0.12
+# Marginal estimate from data: 0.54 (inflated by cross-team variation).
+# Conditional estimate for international football: ~0.30.
+# Calibrate via:  python build_ratings.py --calibrate
+OVERDISPERSION: float = 0.30
 
 # ── Player market values ──────────────────────────────────────────────────────
 

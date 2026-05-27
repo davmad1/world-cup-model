@@ -306,14 +306,17 @@ def run_full_refresh(data_only: bool = False, elo_only: bool = False) -> None:
         print(f"Using existing {RESULTS_CSV} (--elo-only).")
 
     if not data_only:
-        print("⑤ Recomputing Elo ratings …")
-        # Import here to avoid circular issues at top of file
+        print("⑤ Recomputing Elo ratings + tilt …")
         import build_ratings
-        df = build_ratings.load_results(RESULTS_CSV)
-        ratings, _ = build_ratings.compute_ratings(df)
+        df            = build_ratings.load_results(RESULTS_CSV)
+        ratings, _    = build_ratings.compute_ratings(df)
         current_teams = build_ratings.load_current_teams()
         build_ratings.patch_teams_py(current_teams, ratings)
-        print("\n✓ Refresh complete — teams.py updated with latest Elo ratings.")
+        tilts = build_ratings.compute_tilt(df, ratings, current_teams)
+        src   = build_ratings.TEAMS_PY.read_text()
+        src   = build_ratings.patch_tilt(current_teams, tilts, src)
+        build_ratings.TEAMS_PY.write_text(src)
+        print("\n✓ Refresh complete — teams.py updated with Elo ratings and tilt.")
     else:
         print("\n✓ Data refresh complete (--data-only, skipped Elo recompute).")
 
