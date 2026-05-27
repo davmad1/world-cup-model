@@ -8,10 +8,13 @@ Usage
     python simulate.py --group-probs     # also print group-stage win probs
     python simulate.py --matchup ARG BRA # print head-to-head win probability
 
-The model recreates the core logic of FiveThirtyEight's Soccer Power Index:
-  • Multiplicative xG model (off × def / avg)
-  • Independent Poisson goal distributions with Dixon-Coles low-score fix
-  • Full group-stage simulation with FIFA tiebreaker rules
+The model recreates and extends FiveThirtyEight's Soccer Power Index:
+  • Dynamic Elo ratings from 49 000+ historical matches (harmonic MOV, importance weights, altitude/distance HFA)
+  • Multiplicative xG model with tactical tilt (off × def / avg × goal_scalar)
+  • Negative Binomial goal draws + Dixon-Coles low-score correction
+  • Matchday-aware group schedule with final-day incentive modeling
+  • Within-tournament hot-simulation Elo updates
+  • Fair play (card simulation) as tiebreaker
   • Extra time + penalty shootout for knockout ties
   • 12-group / 48-team 2026 format with 8 best third-place qualifiers
 """
@@ -137,7 +140,7 @@ def main() -> None:
 
     print(f"\n2026 FIFA World Cup — SPI Prediction Model (n={args.n:,})")
     print("=" * 60)
-    print("Model: Poisson xG + Dixon-Coles + ET + penalties")
+    print("Model: NB xG + Dixon-Coles + tilt + incentives + ET + penalties")
     print("Groups sourced from openfootball/worldcup.json (official draw).\n")
 
     probs = run_simulation(args.n)
