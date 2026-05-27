@@ -1,8 +1,57 @@
 # 2026 FIFA World Cup Prediction Model
 
-A Python recreation — and deliberate improvement — of FiveThirtyEight's Soccer Power Index (SPI) approach, targeting the 2026 FIFA World Cup (USA / Canada / Mexico, 48 teams, 12 groups).
+A bespoke Monte Carlo prediction engine for the 2026 FIFA World Cup (USA / Canada / Mexico, 48 teams, 104 matches). Built from first principles, drawing on published academic literature and practitioner models — not a port of any single existing system.
 
-The model is **transparent and tweakable**: every parameter lives in [`config.py`](config.py) with inline documentation. We also implement features from Nate Silver's [PELE model](https://www.natesilver.net/p/pele-international-football-rankings-soccer-ratings-projections) that 538's original SPI lacked — and add calibration and explainability tools that PELE doesn't expose at all.
+> **Current top-5 (n=50,000 simulations, updated May 2026)**
+> Spain 15.3% · Argentina 7.7% · France 6.8% · England 4.9% · Brazil 4.6%
+
+---
+
+## What makes this different
+
+Most public WC models are either black boxes (538's SPI, Opta's supercomputer) or direct ports of a single methodology. This model:
+
+- **Draws from multiple academic sources**: Elo engine following Hvattum & Arntzen (2010), match distribution from Dixon & Coles (1997), overdispersion from Rue & Salvesen (2000), tilt concept from PELE (Silver, 2022)
+- **Empirically calibrates its own parameters** — `calibrate.py` runs walk-forward backtests over five historical World Cups (2006–2022) to tune importance weights and validate decay assumptions; the calibration findings are documented and reproducible
+- **Exposes every knob** — all parameters live in `config.py` with inline rationale and calibration evidence; sensitivity sweeps and what-if scenarios run in one command
+- **Updates automatically** — `refresh.py` downloads ~49,000 historical results, ingests live WC scores from ESPN within minutes of full-time, and rebuilds ratings without any manual steps or API keys
+
+---
+
+## Current predictions (May 2026, n=50,000)
+
+Sorted by Win%. CI = 95% binomial confidence interval on the winner probability.
+
+```
+Team                  Grp    SPI   Win%±CI     Final%   SF%    QF%    R16%   Adv%
+--------------------  -----  ----  ----------  -------  -----  -----  -----  -----
+Spain                 H      81.6  15.3±0.3%   22.9%    33.4%  47.2%  68.1%  93.8%
+Argentina             J      79.9   7.7±0.2%   12.6%    20.3%  31.3%  52.2%  89.5%
+France                I      78.8   6.8±0.2%   11.6%    19.3%  31.7%  50.7%  85.5%
+England               L      77.3   4.9±0.2%    8.8%    15.2%  25.4%  46.3%  87.0%
+Brazil                C      75.7   4.6±0.2%    8.9%    16.5%  30.0%  48.1%  84.5%
+Netherlands           F      74.5   4.4±0.2%    8.4%    15.9%  26.8%  45.9%  81.8%
+Ecuador               E      74.4   3.7±0.2%    7.6%    14.3%  26.4%  46.3%  83.9%
+Colombia              K      75.4   3.7±0.2%    6.8%    12.5%  23.3%  41.7%  80.5%
+Switzerland           B      72.7   3.6±0.2%    7.2%    14.5%  28.8%  51.6%  86.6%
+Japan                 F      73.1   3.5±0.2%    7.0%    14.2%  25.1%  44.0%  79.9%
+Germany               E      73.8   3.4±0.2%    6.9%    13.3%  24.7%  44.3%  83.1%
+Uruguay               H      72.2   3.3±0.2%    6.9%    14.8%  27.1%  47.8%  78.4%
+Turkey                D      72.8   3.2±0.2%    6.6%    13.1%  25.9%  44.1%  74.6%
+Morocco               C      73.1   2.9±0.1%    6.3%    12.2%  24.3%  42.1%  81.1%
+Portugal              K      74.3   2.8±0.1%    5.6%    10.9%  21.1%  38.7%  78.5%
+...
+USA                   D      64.8   0.6±0.1%    1.7%     4.7%  11.8%  24.9%  55.2%
+Qatar                 B      52.3   0.1±0.0%    0.2%     0.9%   3.5%  12.1%  38.7%
+```
+
+*SPI = Soccer Power Index (0–100). Adv% = probability of advancing from group stage.*
+
+A few things worth noting in these numbers:
+- **Ecuador (#7, SPI 74.4)** has been quietly one of the strongest CONMEBOL teams of this era; the model rates them above Germany and Portugal
+- **Switzerland (3.6%)** is the model's biggest "stealth contender" — in a softer bracket section, they advance at 86.6%
+- **USA (0.6%)** as hosts is striking; the model sees a meaningful gap between their current squad quality and a legitimate deep run
+- **Morocco (2.9%)** in Group C with Brazil is a tough draw; model gives them 81.1% to advance from a group where they're not the favourite
 
 ---
 
@@ -13,214 +62,265 @@ git clone https://github.com/davmad1/world-cup-model.git
 cd world-cup-model
 pip install -r requirements.txt
 
-# Download all data + compute Elo ratings (no manual steps ever, no API keys)
+# Download all historical data + compute Elo ratings (no manual steps, no API keys)
 python refresh.py
 
-# Run the full simulation (10 000 iterations by default)
-python simulate.py
+# Run the full simulation (50 000 iterations recommended)
+python simulate.py --n 50000
 
-# Head-to-head matchup breakdown
-python explain.py matchup Argentina France
+# Head-to-head breakdown
+python explain.py matchup Spain France
 
-# Sensitivity sweep: how does Spain's win% change as OVERDISPERSION varies?
-python explain.py sensitivity --team Spain --param OVERDISPERSION --min 0.05 --max 0.55
+# What if Mbappe is injured? France attack drops to 1.9
+python explain.py what-if France --off 1.9 --def 0.80
 
-# During the tournament: poll for live results every 15 min
+# Re-run walk-forward calibration (slow — each WC backtest trains on 49k matches)
+python calibrate.py --backtest 2022
+
+# During the tournament: auto-refresh every 15 minutes
 python refresh.py --watch 15
 ```
 
 ---
 
-## How the model works
+## Model architecture
 
-### 1 · Team ratings (dynamic Elo)
+### Layer 1 — Dynamic Elo ratings
 
-Ratings are computed automatically from ~49 000 historical international matches via a modified Elo engine ([`elo.py`](elo.py)), then converted to off/def via logistic scaling. Run `python refresh.py` to recompute from the latest data.
-
-Each team is assigned two numbers:
+The core signal is a modified Elo engine ([`elo.py`](elo.py)) trained chronologically on ~49,000 international matches from 1872 to present. Each team gets two derived ratings:
 
 | Rating | Meaning |
 |---|---|
-| **off** | Expected goals scored vs. an average opponent (baseline ≈ 1.40) |
-| **def** | Expected goals conceded vs. an average opponent (baseline ≈ 1.40) |
+| **off** | Expected goals scored vs. an average opponent (baseline ≈ 1.40 xG) |
+| **def** | Expected goals conceded vs. an average opponent (baseline ≈ 1.40 xG) |
 
-From these we derive the **Soccer Power Index**:
+These feed into the **Soccer Power Index**:
 
 ```
 SPI = 100 × off / (off + def)
 ```
 
-An average team has SPI = 50. The best 2026 teams sit in the 78–82 range.
+An average international team scores SPI ≈ 50. The 2026 field ranges from ~52 (Qatar) to ~82 (Spain).
 
-**Elo engine features:**
-- Harmonic margin of victory: `h = Σ(1/k for k=1..abs(diff))` — diminishing returns for blowouts
-- Match importance weights: WC matches count 1.6×, friendlies 0.5×
-- Home advantage: base Elo boost + altitude exponential (La Paz ≈ +275 pts) + travel distance penalty
-- Provisional period: 2× K-factor for a team's first 100 matches
+**Elo engine details:**
+- **Harmonic margin of victory**: `h = Σ(1/k, k=1..goal_diff)` — diminishing returns; a 3-goal win counts less than 3× a 1-goal win (Hvattum & Arntzen 2010)
+- **Match importance weights**: five semantic bands with calibrated K-factor multipliers (see Layer 5)
+- **Home advantage**: base Elo boost (75 pts) + altitude exponential (La Paz ≈ +275 pts) + away-team travel distance
+- **Provisional period**: new teams get 2× K for their first 100 matches to allow fast convergence from the 1500 prior
 
-### 2 · Match prediction
+### Layer 2 — Tactical tilt
+
+Beyond raw Elo, each team carries a **tilt** score — the residual between their actual goals scored/conceded over their last 60 matches and what Elo alone would predict. This captures attacking or defensive style tendencies that Elo doesn't fully encode.
+
+Tilt is shrunk toward zero by a factor of 0.20 before use (noise control; tactical residuals in international football are very noisy).
+
+### Layer 3 — Match model
 
 For a match between team A and team B:
 
 ```
-goal_scalar = 1 + (tilt_A + tilt_B) × TILT_GOAL_IMPACT   # default: 0.50
-xG_A = off_A × (def_B / LEAGUE_AVG) × goal_scalar
-xG_B = off_B × (def_A / LEAGUE_AVG) × goal_scalar
+goal_scalar = 1 + (tilt_A + tilt_B) × 0.50
+xG_A = off_A × (def_B / 1.40) × goal_scalar
+xG_B = off_B × (def_A / 1.40) × goal_scalar
 ```
 
-**Tactical tilt** is computed from goal residuals over a team's last 60 matches: positive tilt → team produces more total goals than the Elo formula expects; negative → fewer.
+Goals for each team are drawn from **Negative Binomial distributions** (OVERDISPERSION = 0.30), adding more 0-goal and high-scoring outcomes than pure Poisson — reflecting empirical international football variance (Rue & Salvesen 2000).
 
-Goals are drawn from **Negative Binomial distributions** (OVERDISPERSION = 0.30), which adds more 0-goal and high-scoring outcomes than Poisson — matching empirical international football data. A **Dixon-Coles** joint-probability correction (ρ = −0.13) adjusts the likelihood of (0-0), (1-0), (0-1), and (1-1) scorelines.
+A **Dixon-Coles joint-probability correction** (ρ = −0.13) adjusts the likelihood of low-scoring outcomes (0-0, 1-0, 0-1, 1-1), which Poisson/NB systematically misprice (Dixon & Coles 1997).
 
-Win/draw/loss probabilities are also computed analytically (summing the joint PMF over an integer grid) — used by `explain.py matchup` and `simulate.py --matchup`.
+Win/draw/loss probabilities are also computed analytically (summing the joint PMF over an integer grid) for the matchup CLI and explainability tools.
 
-### 3 · Tournament structure
+### Layer 4 — Tournament mechanics
 
-**Group stage** — 12 groups of 4, every team plays 3 matches.  
-Advancement: top 2 from each group (24 teams) + 8 best third-place finishers = 32 teams in the Round of 32.
+**Group stage** — 12 groups of 4, matchday-aware scheduling.
 
-The schedule is matchday-aware (matchday 3 always last). For the final matchday, incentive modeling detects:
-- *Both safe* → each team's xG reduced by 0.50 (defensive positioning)
-- *Both eliminated* → each team's xG increased by 0.50 (nothing to lose)
+On the final matchday, the model detects shared-incentive scenarios:
+- *Both teams already safe* → each team's xG reduced by 0.50 (defensive posturing)
+- *Both teams already eliminated* → each team's xG increased by 0.50 (nothing to lose)
 
-After each simulated group match, a mini Elo update (HOT_K = 10) adjusts the within-simulation ratings so teams carry momentum into knockout rounds.
+Third-place ranking tiebreakers: points → goal difference → goals scored → simulated fair-play card draw.
 
-Third-place ranking: points → goal difference → goals scored → simulated fair-play cards → random tiebreak.
+After each simulated group match, a mini Elo update (HOT_K = 10) adjusts within-simulation ratings so teams carry form into knockout rounds.
 
-**Knockout rounds** — R32 → R16 → QF → SF → Final.  
-Ties after 90 minutes go to **extra time** (30 min, scaled xG), then **penalty shootout** (5 kicks + sudden death, SPI-based success-rate adjustment).
+**Knockout rounds** — R32 → R16 → QF → SF → Final.
 
-### 4 · Monte Carlo simulation
+Draws after 90 min → extra time (scaled xG, 30 min) → penalty shootout (5 kicks + sudden death, SPI-adjusted success rate per kick, ±5pp).
 
-The full tournament is simulated 10 000 times (configurable via `N_SIMS`). Probabilities are the fraction of simulations in which each team reaches each round.
+**Third-place advancement**: top 2 per group (24 teams) + 8 best third-place finishers by FIFA ranking criteria = 32 teams advance.
+
+### Layer 5 — Calibrated importance weights
+
+Match type weights on the K-factor are **empirically tuned** via walk-forward backtesting over five World Cups (2006–2022) using `calibrate.py`. Key findings documented in [`config.py`](config.py):
+
+| Band | Examples | Weight | Calibration note |
+|---|---|---|---|
+| World Cup | FIFA World Cup | **2.00** | Consistently pushes higher in unconstrained optimisation; raised from 1.60 |
+| Continental | UEFA Euro, Copa América, AFCON | 0.30–1.30 | Lower than intuition suggests; confederation quality varies |
+| Qualifying | WC qualification, Euro qualification | 0.10–1.10 | Reduced; path difficulty varies widely by confederation |
+| Minor | Nations League, Olympics | 0.10–0.75 | Small signal; reduced |
+| Friendly | Friendlies | 0.50 | Low but non-zero |
+
+> **Calibration finding**: The unconstrained optimiser consistently finds a corner solution (WC weight → max, everything else → min), driven by the small sample (5 tournaments × ~48 group-stage matches each) and the dominance of ~15 historically stable elite teams. We apply a bounded, domain-knowledge-constrained version rather than the extreme solution, as the corner solution would degrade predictions for the ~30% of 2026 qualifiers with limited WC history.
+
+> **Decay finding**: Contrary to club-football literature, time decay of historical matches *hurts* RPS at all tested half-lives (730 – 3650 days) for international football. Chronological Elo accumulation already handles recency adequately given the low match frequency (~10 matches/year per team vs. 50+ for clubs). Decay is disabled (`ELO_DECAY_HALFLIFE_DAYS = 0`).
 
 ---
 
 ## Data sources
 
-All sources are downloaded automatically by `refresh.py` — **no manual downloads, no API keys required.**
+All sources are downloaded automatically by `refresh.py` — **no manual downloads required**.
 
-| Source | Used for |
-|---|---|
-| [martj42/international_results](https://github.com/martj42/international_results) | ~49 000 historical matches → dynamic Elo ratings |
-| [ESPN scoreboard API](https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard) | Live/completed 2026 WC scores (real-time) |
-| [openfootball/worldcup.json](https://github.com/openfootball/worldcup.json) | Group draw, schedule, cross-check/fallback |
+| Source | Used for | Refresh |
+|---|---|---|
+| [martj42/international_results](https://github.com/martj42/international_results) | ~49,000 historical matches → Elo ratings | On every `refresh.py` run |
+| [ESPN scoreboard API](https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard) | Live/completed 2026 WC scores (real-time) | Queried in 14-day windows |
+| [openfootball/worldcup.json](https://github.com/openfootball/worldcup.json) | Group draw, schedule, cross-check | On every `refresh.py` run |
+| [The Odds API](https://the-odds-api.com) | Bookmaker-implied probabilities (optional) | Set `ODDS_API_KEY` env var |
 
 ---
 
-## Explainability tools
+## Tools
+
+### Simulation
 
 ```bash
-# Full matchup breakdown: ratings, xG formula, scoreline matrix, goal distribution
+python simulate.py                          # 10,000 sims (default)
+python simulate.py --n 50000               # tighter confidence intervals
+python simulate.py --group-probs           # per-group advance probabilities
+python simulate.py --matchup ESP FRA       # head-to-head win probability
+```
+
+When `ODDS_API_KEY` is set and `data/winner_odds.csv` is present, the output adds `Mkt%` (bookmaker implied probability) and `Edge` (model minus market) columns.
+
+### Explainability
+
+```bash
+# Full match breakdown: ratings, xG formula, scoreline heatmap, goal distributions
 python explain.py matchup Spain Brazil
 
-# What if Mbappé is injured and France's attack drops?
-python explain.py what-if France --off 1.9 --def 0.85
+# Scenario: what if France's Mbappé misses the tournament?
+python explain.py what-if France --off 1.90 --def 0.80
 
-# Sensitivity sweep: how much does OVERDISPERSION matter for Argentina?
-python explain.py sensitivity --team Argentina --param OVERDISPERSION --min 0.05 --max 0.55 --steps 6
+# Sensitivity: how sensitive is Spain's win% to overdispersion?
+python explain.py sensitivity --team Spain --param OVERDISPERSION --min 0.05 --max 0.55 --steps 7
 
-# In-sample calibration: are predicted win probabilities well-calibrated?
+# Calibration report: are win probabilities well-calibrated on historical data?
 python explain.py calibration --last 2000
 ```
 
-Sweepable parameters: `OVERDISPERSION`, `RHO`, `TILT_GOAL_IMPACT`, `INCENTIVE_SAFE_XG_ADJ`, `INCENTIVE_ELIM_XG_ADJ`, `HOT_K`, `PEN_BASE`, `HOME_ADV_BASE`, `ALTITUDE_COEFF`, `ELO_GOALS_SCALE`.
+### Calibration
+
+```bash
+# Walk-forward backtest for a single tournament
+python calibrate.py --backtest 2022
+
+# Sweep decay half-lives and find the empirical optimum
+python calibrate.py --decay
+
+# Optimise importance weights via Nelder-Mead over 5 WC backtests
+python calibrate.py --weights
+
+# Both + auto-patch config.py
+python calibrate.py --all
+```
+
+### Evaluation
+
+```bash
+# Compare Naive / Elo-only / full model across 2018 + 2022
+python evaluate.py
+
+# Feature ablation: RPS contribution of each component
+python evaluate.py --ablation 2022
+
+# Match-by-match predictions vs. actuals
+python evaluate.py --show-matches 2022
+```
+
+### Data pipeline
+
+```bash
+python refresh.py              # full pipeline: download → merge → Elo → teams.py → odds
+python refresh.py --data-only  # download only, skip Elo recompute
+python refresh.py --elo-only   # skip download, recompute from existing CSV
+python refresh.py --status     # show data coverage summary
+python refresh.py --watch 15   # auto-refresh every 15 min (live tournament mode)
+```
 
 ---
 
 ## Tweaking the model
 
-All parameters are in **[`config.py`](config.py)**. Key knobs:
+Every parameter is documented in **[`config.py`](config.py)**:
 
 ```python
-# How aggressively ratings update after each match
-ELO_K_BASE = 40.0          # higher = faster adaptation
+ELO_K_BASE = 40.0           # base K-factor; higher = faster adaptation to recent form
+ELO_DECAY_HALFLIFE_DAYS = 0 # 0 = disabled (calibrated: decay hurts RPS for international football)
 
-# Importance multipliers — make WC qualifiers count more or less
-IMPORTANCE["fifa world cup qualification"] = 1.30
+IMPORTANCE["fifa world cup"] = 2.00        # WC matches: nudged up from 1.60 by calibration
+IMPORTANCE["fifa world cup qualification"] = 1.10  # qualifying: reduced; confederation path varies
 
-# Goal distribution shape
-OVERDISPERSION = 0.30      # 0 = Poisson; higher = more upsets + more blowouts
-RHO = -0.13                # Dixon-Coles correction strength
+OVERDISPERSION = 0.30       # negative-binomial dispersion (0 = Poisson)
+RHO = -0.13                 # Dixon-Coles low-score correction
 
-# Home advantage components
-HOME_ADV_BASE = 75.0       # flat advantage in Elo points
-ALTITUDE_COEFF = 60.0      # exponential altitude multiplier (La Paz ≈ +275 pts)
+HOME_ADV_BASE = 75.0        # base home advantage in Elo points
+ALTITUDE_COEFF = 60.0       # La Paz ≈ +275 pts; Mexico City ≈ +33 pts
 
-# Tilt
-TILT_GOAL_IMPACT = 0.50    # how much tilt scales total expected goals
-TILT_TACTICAL_SHRINK = 0.20  # shrinks raw tilt estimate toward zero (noise control)
-
-# Simulation precision
-N_SIMS = 10_000            # more sims = tighter confidence intervals
+TILT_GOAL_IMPACT = 0.50     # how much tactical tilt scales total xG
+N_SIMS = 10_000             # Monte Carlo iterations
 ```
 
-After changing any parameter, re-run `python simulate.py` to see the updated probabilities.
+After any change, run `python simulate.py` to see updated probabilities. Use `python explain.py sensitivity` to sweep a parameter range.
 
 ---
 
 ## File map
 
 ```
-refresh.py         One-command data pipeline: download → merge → Elo → tilt → teams.py
-simulate.py        Main CLI — run Monte Carlo, print results table
-tournament.py      Group stage + knockout bracket logic (incentives, hot sim, fair play)
+simulate.py        Main CLI — Monte Carlo tournament simulation + results table
+refresh.py         Automated data pipeline: download → merge → Elo → odds
+build_ratings.py   Elo computation pipeline: results.csv → ratings → teams.py
+elo.py             Elo engine: harmonic MOV, importance weights, HFA, itertuples loop
 model.py           Match model: NB xG, Dixon-Coles, tilt, extra time, penalties
-explain.py         Transparency layer: matchup breakdown, what-if, sensitivity, calibration
+tournament.py      Tournament mechanics: group stage, tiebreakers, bracket, hot-sim
 teams.py           48-team roster with off/def/tilt/group (auto-updated by refresh.py)
-fetch_data.py      Pull live draw + schedule from openfootball; squad data (optional)
-config.py          Every tunable parameter with documentation
-elo.py             Elo engine: harmonic margin, importance weights, altitude/distance HFA
-build_ratings.py   Pipeline: results.csv → Elo → tilt → patch teams.py ratings
-requirements.txt   Python dependencies
+explain.py         Transparency: matchup breakdown, what-if, sensitivity, calibration
+calibrate.py       Empirical calibration engine: walk-forward RPS, decay sweep, weight optimisation
+evaluate.py        Historical benchmarking: Naive / Elo-only / full model / ablation
+odds.py            Bookmaker odds: The Odds API integration, overround removal, CSV persistence
+config.py          Every tunable parameter with inline documentation and calibration evidence
 data/              Gitignored — populated automatically by refresh.py
 ```
 
 ---
 
-## Comparison to PELE (Nate Silver's model)
+## Calibration benchmarks
 
-| Feature | PELE | This model |
-|---|---|---|
-| Match distribution | Negative binomial | ✅ Negative binomial + Dixon-Coles |
-| Team ratings | Dynamic Elo + player values | ✅ Dynamic Elo (from 49k matches) |
-| Tilt ratings | ✅ | ✅ Tactical tilt from goal residuals |
-| Home advantage | Altitude + distance + per-team coefficient | ✅ Altitude + distance |
-| Match importance weighting | ✅ | ✅ |
-| Group incentive modeling | ✅ | ✅ Final-matchday xG adjustment |
-| Within-tournament form | ✅ | ✅ Hot-simulation Elo nudges |
-| Age trajectory | ✅ | — (planned; no free automated data source) |
-| Player market values | ✅ | — (planned; no free automated data source) |
-| Parameter transparency | ❌ proprietary | ✅ Everything in config.py |
-| Sensitivity analysis | ❌ | ✅ `explain.py sensitivity` |
-| What-if scenarios | ❌ | ✅ `explain.py what-if` |
-| Calibration reports | ❌ not published | ✅ `explain.py calibration` |
-| Open source | ❌ | ✅ |
+Walk-forward RPS (Ranked Probability Score) across WC group stages. Lower = better. Naive baseline ≈ 0.239 (predicting 1/3 for each outcome).
+
+| Model | 2018 WC | 2022 WC | Notes |
+|---|---|---|---|
+| Naive (1/3 each) | 0.242 | 0.239 | No-skill baseline |
+| Elo only | 0.211 | 0.219 | No tilt, no NB, no DC correction |
+| Full model (no decay) | 0.214 | 0.219 | Current production config |
+| Full model (with decay) | 0.229 | 0.223 | Decay consistently hurts for international football |
+
+The model beats the naive baseline by ~9% on RPS. Tilt and Dixon-Coles improve score *distribution* prediction (relevant for tournament simulation) but not win/loss/draw RPS directly — those features earn their place through better goal totals, not better match outcome rank-ordering.
 
 ---
 
-## Example output
+## Methodological references
 
-```
-2026 FIFA World Cup — SPI Prediction Model (n=10,000)
-============================================================
-Model: NB xG + Dixon-Coles + tilt + incentives + ET + penalties
-Groups sourced from openfootball/worldcup.json (official draw).
-
-Team                  Grp      SPI  Win%    Final%    SF%    QF%    R16%    Adv%
---------------------  -----  -----  ------  --------  -----  -----  ------  ------
-Spain                 H       81.6  15.4%   23.2%     34.0%  47.8%  68.0%   94.3%
-Argentina             J       79.9   7.2%   11.9%     19.3%  30.6%  51.4%   89.1%
-France                I       78.8   6.9%   11.8%     19.4%  32.0%  50.7%   86.0%
-England               L       77.3   5.1%    8.8%     14.8%  25.1%  45.5%   87.2%
-Netherlands           F       74.5   4.7%    8.4%     16.1%  26.9%  45.6%   81.5%
-Brazil                C       75.7   4.3%    8.7%     15.8%  29.4%  47.4%   84.2%
-...
-Qatar                 B       52.3   0.0%    0.1%      0.8%   3.4%  11.9%   38.8%
-```
+- **Dixon & Coles (1997)** — "Modelling Association Football Scores and Inefficiencies in the Football Betting Market" — joint Poisson correction for low-score outcomes
+- **Rue & Salvesen (2000)** — "Prediction and Retrospective Analysis of Soccer Matches in a League" — time-varying Elo, negative binomial overdispersion
+- **Hvattum & Arntzen (2010)** — "Using ELO ratings for match result prediction in association football" — establishes Elo as a competitive match predictor for international football
+- **Silver, N. (2022)** — [PELE model](https://www.natesilver.net/p/pele-international-football-rankings-soccer-ratings-projections) — match importance weighting, tilt concept, group-incentive modeling
 
 ---
 
 ## Contributing
 
-Pull requests welcome. If you update `config.py` parameters, please include the before/after simulation output so the change can be evaluated.
+Pull requests welcome. Before submitting, please:
+1. Run `python calibrate.py --backtest 2022` and include the RPS in your PR description
+2. Include before/after `python simulate.py` output so changes can be evaluated
+3. Update `config.py` comments if you change a parameter value
