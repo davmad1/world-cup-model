@@ -343,6 +343,7 @@ def compute_elo(
     init_elo: float = 1_500.0,
     verbose: bool = False,
     decay: bool = True,
+    return_history: bool = True,
 ) -> tuple[dict[str, float], pd.DataFrame]:
     """
     Compute Elo ratings by processing *matches_df* chronologically.
@@ -356,22 +357,25 @@ def compute_elo(
         If True (default), apply exponential time-decay to the K-factor so that
         older matches contribute less.  The half-life is config.ELO_DECAY_HALFLIFE_DAYS
         (default 1 460 days = 4 years).  Set False for ablation/comparison.
+    return_history : bool
+        If False, skip building the per-match history DataFrame (much faster for
+        calibration loops that only need the final ratings dict).
 
     Returns
     -------
     ratings : dict[team_name → current Elo]
-    history : DataFrame with columns [date, team, elo] for plotting
+    history : DataFrame with columns [date, home, away, elo_home, elo_away]
+              (empty DataFrame when return_history=False)
     """
     ratings: dict[str, float] = {}
     match_count: dict[str, int] = {}
-    history_rows: list[dict] = []
 
-    # Ensure date-sorted
+    # Ensure date-sorted — copy only what we may mutate
     df = matches_df.copy()
     df["date"] = pd.to_datetime(df["date"])
     df = df.sort_values("date").reset_index(drop=True)
 
-    # Normalise neutral column
+    # Normalise neutral column once
     if df["neutral"].dtype == object:
         df["neutral"] = df["neutral"].str.upper() == "TRUE"
 
@@ -379,9 +383,13 @@ def compute_elo(
     _LN2 = math.log(2)
     reference_date = df["date"].max()
 
-    for _, row in df.iterrows():
-        home_raw = str(row["home_team"])
-        away_raw = str(row["away_team"])
+    history_rows: list[dict] = []
+    processed = 0
+
+    # itertuples is ~8-10× faster than iterrows for large DataFrames
+    for row in df.itertuples(index=False):
+        home_raw = str(row.home_team)
+        away_raw = str(row.away_team)
 
         home = normalise_name(home_raw)
         away = normalise_name(away_raw)
@@ -390,20 +398,22 @@ def compute_elo(
             continue  # skip defunct / B-team entries
 
         # Initialise unseen teams at the prior
-        for team in (home, away):
-            if team not in ratings:
-                ratings[team] = init_elo
-                match_count[team] = 0
+        if home not in ratings:
+            ratings[home] = init_elo
+            match_count[home] = 0
+        if away not in ratings:
+            ratings[away] = init_elo
+            match_count[away] = 0
 
         r_home = ratings[home]
         r_away = ratings[away]
 
         # Home advantage (0 for neutral sites)
         hfa = home_advantage_elo(
-            home_city=str(row.get("city", "")),
-            home_country=str(row.get("country", home)),
+            home_city=str(getattr(row, "city", "") or ""),
+            home_country=str(getattr(row, "country", home) or home),
             away_country=away,
-            neutral=bool(row["neutral"]),
+            neutral=bool(row.neutral),
         )
 
         # Expected scores (logistic)
@@ -412,7 +422,7 @@ def compute_elo(
         e_away = 1.0 - e_home
 
         # Actual score via harmonic margin
-        goal_diff = int(row["home_score"]) - int(row["away_score"])
+        goal_diff = int(row.home_score) - int(row.away_score)
         h = harmonic_margin(goal_diff)
 
         if goal_diff > 0:
@@ -423,9 +433,9 @@ def compute_elo(
             actual_home, actual_away = 0.5, 0.5
 
         # K-factor: base × importance × decay × provisional multiplier × harmonic scale
-        imp  = importance_weight(str(row.get("tournament", "")))
+        imp  = importance_weight(str(getattr(row, "tournament", "") or ""))
         if decay and config.ELO_DECAY_HALFLIFE_DAYS > 0:
-            days_ago = max(0, (reference_date - row["date"]).days)
+            days_ago = max(0, (reference_date - row.date).days)
             decay_factor = math.exp(-_LN2 * days_ago / config.ELO_DECAY_HALFLIFE_DAYS)
         else:
             decay_factor = 1.0
@@ -443,13 +453,17 @@ def compute_elo(
         match_count[home] += 1
         match_count[away] += 1
 
-        history_rows.append({"date": row["date"], "home": home, "away": away,
-                              "elo_home": ratings[home], "elo_away": ratings[away]})
+        if return_history:
+            history_rows.append({"date": row.date, "home": home, "away": away,
+                                  "elo_home": ratings[home], "elo_away": ratings[away]})
+            processed = len(history_rows)
+        else:
+            processed += 1
 
-        if verbose and len(history_rows) % 5_000 == 0:
-            print(f"  processed {len(history_rows):,} matches …")
+        if verbose and processed % 5_000 == 0:
+            print(f"  processed {processed:,} matches …")
 
-    history = pd.DataFrame(history_rows)
+    history = pd.DataFrame(history_rows) if return_history else pd.DataFrame()
     return ratings, history
 
 

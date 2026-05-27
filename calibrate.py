@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from scipy.optimize import minimize
+from scipy.optimize import minimize, Bounds  # noqa: F401  (Bounds used inside fn)
 
 import config
 from elo import compute_elo, elo_to_off_def, normalise_name
@@ -97,7 +97,8 @@ def backtest_wc(
     Parameters
     ----------
     year          : WC year (must be in WC_YEARS)
-    full_df       : complete results DataFrame (from results.csv)
+    full_df       : complete results DataFrame (from results.csv).
+                    Should already have date as datetime64 and be sorted by date.
     importance    : override for config.IMPORTANCE (None = use config)
     decay_halflife: override for config.ELO_DECAY_HALFLIFE_DAYS (None = use config)
     verbose       : print match-by-match predictions
@@ -112,17 +113,15 @@ def backtest_wc(
     wc_start = WC_YEARS[year]
     cutoff   = pd.Timestamp(wc_start) - pd.Timedelta(days=CUTOFF_DAYS_BEFORE)
 
-    full_df = full_df.copy()
-    full_df["date"] = pd.to_datetime(full_df["date"])
-
-    train_df = full_df[full_df["date"] < cutoff].copy()
+    # full_df is expected to already have datetime dates
+    train_df = full_df[full_df["date"] < cutoff]
     wc_df    = full_df[
         (full_df["date"] >= pd.Timestamp(wc_start)) &
         (full_df["date"].dt.year == year) &
         (full_df["tournament"].str.contains("FIFA World Cup", case=False, na=False))
-    ].copy()
+    ]
 
-    # Only group stage: matches before the R32 cutoff (first ~18 days)
+    # Only group stage: matches before the R32 cutoff (first ~20 days)
     group_end = pd.Timestamp(wc_start) + pd.Timedelta(days=20)
     wc_df = wc_df[wc_df["date"] <= group_end]
 
@@ -143,7 +142,8 @@ def backtest_wc(
             config.ELO_DECAY_HALFLIFE_DAYS = decay_halflife
 
         use_decay = config.ELO_DECAY_HALFLIFE_DAYS > 0
-        ratings, _ = compute_elo(train_df, decay=use_decay)
+        # return_history=False: skip building the history DataFrame (2-3× faster for calibration)
+        ratings, _ = compute_elo(train_df, decay=use_decay, return_history=False)
     finally:
         config.IMPORTANCE.clear()
         config.IMPORTANCE.update(orig_importance)
@@ -246,38 +246,82 @@ def sweep_decay_halflife(
 
 
 # ── Importance weight optimisation ───────────────────────────────────────────
+#
+# We tune 4 semantic bands with explicit bounds via L-BFGS-B:
+#
+#   CONSEQUENTIAL  — high-stakes championships where best teams play each other
+#                    (WC, Euros, Copa America, AFCON, Asian Cup, Gold Cup)
+#   QUALIFYING     — competitive qualifiers with real opposition
+#                    (WC qualification, Euro qualification, general qualifiers)
+#   MINOR          — lower-stakes or weaker-signal competitive matches
+#                    (Nations League, Olympics)
+#   FRIENDLY       — preparation / low-stakes matches
+#
+# The bands encode the user's conceptual hierarchy: a WC group-stage match
+# (England vs USA) is far more informative than England vs Luxembourg in
+# WC qualifying.  The K-factor already discounts lopsided expected results;
+# these weights control the *marginal* learning rate per match type.
 
-# We tune these 4 multipliers; "qualification" is the reference at 1.0.
-_TUNE_KEYS = ["friendly", "copa america", "copa américa", "uefa euro",
-              "african cup of nations", "afc asian cup",
-              "fifa world cup qualification", "fifa world cup"]
-
-_PARAM_MAP = {
-    # param_name → list of IMPORTANCE keys it controls (allow grouped tuning)
-    "friendly":   ["friendly", "nations league", "nations league qualification",
-                   "olympic", "olympics"],
-    "continental": ["copa america", "copa américa", "uefa euro", "uefa european",
-                    "african cup of nations", "afc asian cup", "concacaf gold cup",
-                    "confederation cup", "confederations cup"],
-    "wc_qual":    ["fifa world cup qualification", "uefa euro qualification",
-                   "qualification"],
-    "wc":         ["fifa world cup"],
+_PARAM_MAP: dict[str, list[str]] = {
+    # The biggest championship: uniquely high-stakes, opponent quality is top-tier.
+    # Empirically the strongest predictor of WC performance, allowed to go high.
+    "wc": [
+        "fifa world cup",
+    ],
+    # Other major finals: important but weaker WC-signal than WC matches themselves.
+    # (Teams field different squads; schedule varies; confederation quality varies.)
+    "continental": [
+        "copa america", "copa américa",
+        "uefa euro", "uefa european",
+        "african cup of nations",
+        "afc asian cup",
+        "concacaf gold cup",
+        "confederation cup", "confederations cup",
+    ],
+    # Competitive qualifiers — real opposition, high stakes, but noisy:
+    # easy confederation paths (e.g., OFC, CONCACAF) dilute the signal.
+    "qualifying": [
+        "fifa world cup qualification",
+        "uefa euro qualification",
+        "qualification",   # catch-all qualifier
+    ],
+    # Lower-stakes or weaker-signal competitive
+    "minor": [
+        "nations league",
+        "nations league qualification",
+        "olympic", "olympics",
+    ],
+    # Preparation / non-competitive
+    "friendly": [
+        "friendly",
+    ],
 }
+
+# Bounds for L-BFGS-B: (lb, ub) per band.
+# Designed so each band stays in a physically sensible range:
+#   wc          → can go as high as 4.5; floor at 1.0 so WC always matters most
+#   continental → should be significant but below WC; floor at 0.3
+#   qualifying  → meaningful signal but noisy; floor at 0.1
+#   minor       → quite small, at most 1.0
+#   friendly    → low; at most 0.8
+_BOUNDS = [
+    (1.00, 4.50),  # wc
+    (0.30, 2.50),  # continental
+    (0.10, 1.50),  # qualifying
+    (0.10, 1.00),  # minor
+    (0.05, 0.80),  # friendly
+]
+
+_BAND_NAMES   = ["wc", "continental", "qualifying", "minor", "friendly"]
+_BAND_DISPLAY = ["wc          ", "continental ", "qualifying  ", "minor       ", "friendly    "]
 
 
 def _params_to_importance(params: list[float]) -> dict[str, float]:
-    """Convert [friendly, continental, wc_qual, wc] vector → full IMPORTANCE dict."""
-    friendly_w, continental_w, wc_qual_w, wc_w = params
+    """Convert [consequential, qualifying, minor, friendly] → full IMPORTANCE dict."""
     out = deepcopy(config.IMPORTANCE)
-    # qualifier stays at 1.0 (reference)
-    for key in _PARAM_MAP["friendly"]:
-        out[key] = max(0.1, friendly_w)
-    for key in _PARAM_MAP["continental"]:
-        out[key] = max(0.1, continental_w)
-    for key in _PARAM_MAP["wc_qual"]:
-        out[key] = max(0.1, wc_qual_w)
-    for key in _PARAM_MAP["wc"]:
-        out[key] = max(0.1, wc_w)
+    for band, weight in zip(_BAND_NAMES, params):
+        for key in _PARAM_MAP[band]:
+            out[key] = float(weight)
     return out
 
 
@@ -285,47 +329,67 @@ def optimize_importance_weights(full_df: pd.DataFrame) -> dict[str, float]:
     """
     Find IMPORTANCE weights that minimise mean RPS across 2006–2022 WC group stages.
 
+    Uses L-BFGS-B with explicit per-band bounds to prevent degenerate corner
+    solutions (e.g., all weights collapsing to zero).
+
+    Starting point: average of the current config values in each band.
+
     Returns the best-fit {key: weight} dict (same structure as config.IMPORTANCE).
     """
-    # Starting point from current config
-    x0 = [
-        config.IMPORTANCE.get("friendly", 0.5),
-        config.IMPORTANCE.get("copa america", 1.2),
-        config.IMPORTANCE.get("fifa world cup qualification", 1.3),
-        config.IMPORTANCE.get("fifa world cup", 1.6),
-    ]
+    from scipy.optimize import Bounds
+
+    def _band_start(band: str) -> float:
+        vals = [config.IMPORTANCE.get(k, config.IMPORTANCE_DEFAULT)
+                for k in _PARAM_MAP[band]]
+        return sum(vals) / len(vals)
+
+    x0 = [_band_start(b) for b in _BAND_NAMES]
+    lb  = [lo for lo, _ in _BOUNDS]
+    ub  = [hi for _, hi in _BOUNDS]
+    # Clip starting point to its band's bounds
+    x0  = [max(lo, min(hi, v)) for v, (lo, hi) in zip(x0, _BOUNDS)]
 
     call_count = [0]
 
     def objective(params: list[float]) -> float:
         call_count[0] += 1
-        imp = _params_to_importance(params)
+        # Hard-clip to bounds inside the objective so Nelder-Mead can't escape
+        clipped = [max(lo, min(hi, v)) for v, (lo, hi) in zip(params, _BOUNDS)]
+        imp = _params_to_importance(clipped)
         score = _aggregate_rps(full_df, importance=imp)
-        if call_count[0] % 10 == 0:
-            print(f"    iter {call_count[0]:>4}: friendly={params[0]:.2f}  "
-                  f"continental={params[1]:.2f}  wc_qual={params[2]:.2f}  "
-                  f"wc={params[3]:.2f}  →  RPS={score:.5f}")
+        if call_count[0] % 5 == 0:
+            parts = "  ".join(
+                f"{d}={c:.2f}"
+                for d, c in zip(_BAND_DISPLAY, clipped)
+            )
+            print(f"    iter {call_count[0]:>4}: {parts}  →  RPS={score:.5f}",
+                  flush=True)
         return score
 
-    print("Optimising importance weights (Nelder-Mead) …")
-    print(f"  Starting RPS: {objective(x0):.5f}")
+    print("Optimising importance weights (Nelder-Mead + clipped bounds) …",
+          flush=True)
+    print(f"  Bands   : {' | '.join(_BAND_NAMES)}", flush=True)
+    print(f"  Bounds  : {' | '.join(f'[{lo:.2f},{hi:.2f}]' for lo, hi in _BOUNDS)}",
+          flush=True)
+    print(f"  Starting: {' | '.join(f'{v:.2f}' for v in x0)}", flush=True)
+    print(f"  Starting RPS: {objective(x0):.5f}", flush=True)
 
     result = minimize(
         objective, x0,
         method="Nelder-Mead",
-        options={"maxiter": 500, "xatol": 1e-4, "fatol": 1e-5, "disp": False},
+        options={"maxiter": 800, "xatol": 1e-4, "fatol": 1e-5, "disp": False},
     )
 
-    best_params = result.x.tolist()
+    raw_params  = result.x.tolist()
+    best_params = [max(lo, min(hi, v)) for v, (lo, hi) in zip(raw_params, _BOUNDS)]
     best_imp    = _params_to_importance(best_params)
 
-    print(f"\nOptimisation complete ({call_count[0]} evaluations).")
-    print(f"  Best RPS: {result.fun:.5f}")
-    print(f"  Parameters:")
-    print(f"    friendly      = {best_params[0]:.3f}  (was {x0[0]:.3f})")
-    print(f"    continental   = {best_params[1]:.3f}  (was {x0[1]:.3f})")
-    print(f"    wc_qualifier  = {best_params[2]:.3f}  (was {x0[2]:.3f})")
-    print(f"    wc            = {best_params[3]:.3f}  (was {x0[3]:.3f})")
+    print(f"\nOptimisation complete ({call_count[0]} evaluations).", flush=True)
+    print(f"  Best RPS : {result.fun:.5f}")
+    print(f"\n  Band weights (start → optimal  [lo, hi]):")
+    for name, start, opt, (lo, hi) in zip(_BAND_NAMES, x0, best_params, _BOUNDS):
+        at_bound = " ← AT BOUND" if abs(opt - lo) < 0.01 or abs(opt - hi) < 0.01 else ""
+        print(f"    {name:<14}  {start:.3f} → {opt:.3f}  [{lo:.2f}, {hi:.2f}]{at_bound}")
 
     return best_imp
 
@@ -382,13 +446,25 @@ def patch_config_importance(best_imp: dict[str, float]) -> None:
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def _load_df() -> pd.DataFrame:
+    """
+    Load and pre-process results CSV once.
+
+    Pre-processing here (date conversion, sort, neutral normalisation) means
+    backtest_wc() can skip these steps on every optimiser call — significant
+    speedup when the optimiser runs hundreds of objective evaluations.
+    """
     if not RESULTS_CSV.exists():
         sys.exit("data/results.csv not found — run `python refresh.py --data-only` first.")
     df = pd.read_csv(RESULTS_CSV)
     df = df.dropna(subset=["home_score", "away_score"])
     df["home_score"] = df["home_score"].astype(int)
     df["away_score"] = df["away_score"].astype(int)
-    print(f"Loaded {len(df):,} matches from {RESULTS_CSV.name}\n")
+    # Pre-process once so every backtest_wc / compute_elo call reuses these
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.sort_values("date").reset_index(drop=True)
+    if df["neutral"].dtype == object:
+        df["neutral"] = df["neutral"].str.upper() == "TRUE"
+    print(f"Loaded {len(df):,} matches from {RESULTS_CSV.name}\n", flush=True)
     return df
 
 

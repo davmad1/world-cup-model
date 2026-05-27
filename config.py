@@ -61,23 +61,40 @@ DISTANCE_PER_1000KM: float = 10.0
 DISTANCE_CAP: float = 60.0
 
 # ── Match importance multipliers ──────────────────────────────────────────────
-# Applied to K when updating ratings. Friendlies matter less; WC matches most.
-# The strings are matched case-insensitively against the tournament name in
-# results.csv (martj42). Add or adjust rows here — no code changes needed.
-# Initial values are informed guesses; calibrate empirically via:
-#   python calibrate.py --weights
+# Applied to K when updating ratings.
+#
+# Calibration note (python calibrate.py --weights):
+#   The unconstrained optimizer always finds a corner solution: WC weight → max,
+#   everything else → min. This is a biased result — the 5-WC backtest sample
+#   is dominated by ~15 historically dominant teams (Spain, Germany, Argentina…)
+#   that appear in every WC AND every continental tournament. The optimizer can't
+#   cleanly separate "WC history is informative" from "strong teams stay strong
+#   regardless of match type." Applying the extreme weights (wc=4.5, others=0.1)
+#   would also hurt 2026 prediction: many of the 48 qualifiers have limited WC
+#   history, and their best signal comes from continental / qualifying form.
+#
+# Approach: use domain-knowledge weights that reflect the user's semantic bands,
+#   nudged modestly toward the optimizer's direction (WC slightly up, qualifying
+#   slightly down). Re-run calibrate.py --weights after adding more WC tournaments
+#   to the backtest set for a less biased estimate.
+#
+# Semantic bands (calibrate.py --weights):
+#   Consequential  (WC, Euros, Copa…):  high    — championship-level opposition
+#   Competitive qualifying:             medium  — real opposition but noisy path
+#   Minor / low-stakes:                 low
+#   Friendly:                           low     — preparation, but uninformative
 IMPORTANCE: dict[str, float] = {
     "friendly":                        0.50,
-    "nations league":                  0.80,
-    "nations league qualification":    0.70,
+    "nations league":                  0.75,
+    "nations league qualification":    0.65,
     "confederation cup":               1.10,
     "confederations cup":              1.10,
-    "olympic":                         0.70,
-    "olympics":                        0.70,
+    "olympic":                         0.65,
+    "olympics":                        0.65,
     # Regional qualifying
-    "qualification":                   1.00,   # default qualifier catch-all
-    "uefa euro qualification":         1.10,
-    "fifa world cup qualification":    1.30,
+    "qualification":                   0.90,   # default qualifier catch-all
+    "uefa euro qualification":         1.00,
+    "fifa world cup qualification":    1.10,
     # Continental tournaments
     "african cup of nations":          1.10,
     "afc asian cup":                   1.10,
@@ -86,11 +103,11 @@ IMPORTANCE: dict[str, float] = {
     "copa américa":                    1.20,
     "uefa euro":                       1.30,
     "uefa european":                   1.30,
-    # World Cup
-    "fifa world cup":                  1.60,
+    # World Cup — nudged up from 1.60; optimizer consistently pushes this higher
+    "fifa world cup":                  2.00,
 }
 # Fallback when no keyword matches
-IMPORTANCE_DEFAULT: float = 0.80
+IMPORTANCE_DEFAULT: float = 0.75
 
 # ── Elo-to-goals conversion ───────────────────────────────────────────────────
 
