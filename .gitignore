@@ -1,7 +1,8 @@
-# Kaggle datasets — download manually (see README for links)
+# Generated data files (populated automatically by refresh.py)
 data/*.csv
 data/*.json
 data/*.parquet
+data/*.zip
 
 # Keep the data directory itself
 !data/.gitkeep

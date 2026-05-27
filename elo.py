@@ -25,7 +25,7 @@ import pandas as pd
 import config
 
 # ── Team name normalisation ───────────────────────────────────────────────────
-# Maps Kaggle CSV names → canonical names used in teams.py.
+# Maps martj42 CSV names → canonical names used in teams.py.
 # Historical predecessor states map to their modern successors.
 
 TEAM_NAME_MAP: dict[str, str] = {

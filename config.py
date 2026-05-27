@@ -41,7 +41,7 @@ DISTANCE_CAP: float = 60.0
 # ── Match importance multipliers ──────────────────────────────────────────────
 # Applied to K when updating ratings. Friendlies matter less; WC matches most.
 # The strings are matched case-insensitively against the tournament name in
-# the Kaggle results CSV. Add or adjust rows here — no code changes needed.
+# results.csv (martj42). Add or adjust rows here — no code changes needed.
 IMPORTANCE: dict[str, float] = {
     "friendly":                        0.50,
     "nations league":                  0.80,

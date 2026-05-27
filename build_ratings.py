@@ -1,16 +1,8 @@
 """
-build_ratings.py — Pipeline: Kaggle CSVs → dynamic team ratings in teams.py
+build_ratings.py — Pipeline: historical match results → dynamic team ratings in teams.py
 
-Downloads are NOT included in the repo (data/ is gitignored).
-Place the Kaggle CSV at data/results.csv before running.
-
-Kaggle dataset
---------------
-Search: "International Soccer Results 1872 to 2024"
-URL   : https://www.kaggle.com/datasets/martj42/international-football-results-from-1872-to-2017
-File  : results.csv
-Cols  : date, home_team, away_team, home_score, away_score,
-        tournament, city, country, neutral
+Reads data/results.csv (populated automatically by refresh.py).
+Run `python refresh.py` first if the file is missing.
 
 Usage
 -----
@@ -45,9 +37,7 @@ def load_results(path: Path = RESULTS_CSV) -> pd.DataFrame:
     if not path.exists():
         sys.exit(
             f"\nERROR: {path} not found.\n\n"
-            "Download the Kaggle dataset:\n"
-            "  https://www.kaggle.com/datasets/martj42/international-football-results-from-1872-to-2017\n"
-            "Place results.csv in the data/ directory, then re-run.\n"
+            "Run `python refresh.py --data-only` to download it automatically.\n"
         )
     df = pd.read_csv(path)
     # Drop rows with missing scores
@@ -182,7 +172,7 @@ def show_history(history: pd.DataFrame, team: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Build dynamic Elo ratings from Kaggle historical match data"
+        description="Build dynamic Elo ratings from historical match data (data/results.csv)"
     )
     parser.add_argument("--calibrate", action="store_true",
                         help="Fit and print the OVERDISPERSION parameter from goal data")

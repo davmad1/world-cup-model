@@ -13,7 +13,10 @@ git clone https://github.com/davmad1/world-cup-model.git
 cd world-cup-model
 pip install -r requirements.txt
 
-# Run the baseline model (uses pre-set SPI ratings)
+# Download all data + compute Elo ratings (no manual steps ever)
+python refresh.py
+
+# Run the full simulation (10 000 iterations by default)
 python simulate.py
 
 # Head-to-head matchup probability
@@ -22,8 +25,8 @@ python simulate.py --matchup Argentina France
 # Per-group advance probabilities
 python simulate.py --group-probs
 
-# Sync groups/schedule from the live openfootball feed
-python fetch_data.py --update-teams
+# During the tournament: poll for live results every 15 min
+python refresh.py --watch 15
 ```
 
 ---
@@ -47,7 +50,7 @@ SPI = 100 × off / (off + def)
 
 An average team has SPI = 50. The best 2026 teams sit in the 70–78 range.
 
-Currently (baseline) these are hand-calibrated estimates. Phase 1 replaces them with ratings derived automatically from ~45 000 historical international matches via a modified Elo engine (`elo.py`).
+Ratings are computed automatically from ~49 000 historical international matches via a modified Elo engine (`elo.py`), then converted to off/def via a logistic scaling. Run `python refresh.py` to recompute from the latest data.
 
 ### 2 · Match prediction
 
@@ -82,10 +85,12 @@ The full tournament is simulated 10 000 times (configurable in `config.py` via `
 
 | Source | Used for | Auth |
 |---|---|---|
-| [openfootball/worldcup.json](https://github.com/openfootball/worldcup.json) | Official group draw, match schedule, live results | None |
-| [Kaggle: International Soccer Results 1872–2024](https://www.kaggle.com/datasets/martj42/international-football-results-from-1872-to-2017) | Historical matches → dynamic Elo ratings (Phase 1) | Free Kaggle account |
-| [Kaggle: Transfermarkt player data](https://www.kaggle.com/datasets/davidcariboo/player-scores) | Squad market values → tilt + age trajectory (Phase 2) | Free Kaggle account |
+| [martj42/international_results](https://github.com/martj42/international_results) | ~49 000 historical matches → dynamic Elo ratings | None |
+| [ESPN scoreboard API](https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard) | Live/completed 2026 WC scores (real-time) | None |
+| [openfootball/worldcup.json](https://github.com/openfootball/worldcup.json) | Group draw, schedule, cross-check backup | None |
 | [football-data.org v4 API](https://www.football-data.org) | Squad rosters, live standings | Free API key |
+
+All three primary sources are downloaded automatically by `refresh.py` — no manual steps required.
 
 ---
 
@@ -119,6 +124,7 @@ After changing any parameter, re-run `python simulate.py` to see the updated pro
 ## File map
 
 ```
+refresh.py         One-command data pipeline: download → merge → Elo → teams.py
 simulate.py        Main CLI — run Monte Carlo, print results table
 tournament.py      Group stage + knockout bracket logic
 model.py           Match simulation: xG formula, Poisson/NegBin, Dixon-Coles, pens
@@ -126,9 +132,9 @@ teams.py           48-team roster with off/def/group (auto-updated by build_rati
 fetch_data.py      Pull live draw + schedule from openfootball; squad data from football-data.org
 config.py          Every tunable parameter with documentation
 elo.py             Elo engine: harmonic margin, importance weights, altitude/distance HFA
-build_ratings.py   Pipeline: Kaggle results.csv → Elo → patch teams.py ratings
+build_ratings.py   Pipeline: results.csv → Elo → patch teams.py ratings
 requirements.txt   Python dependencies
-data/              Gitignored — place Kaggle CSVs here
+data/              Gitignored — populated automatically by refresh.py
 ```
 
 ---
