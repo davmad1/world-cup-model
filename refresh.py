@@ -316,9 +316,27 @@ def run_full_refresh(data_only: bool = False, elo_only: bool = False) -> None:
         src   = build_ratings.TEAMS_PY.read_text()
         src   = build_ratings.patch_tilt(current_teams, tilts, src)
         build_ratings.TEAMS_PY.write_text(src)
-        print("\n✓ Refresh complete — teams.py updated with Elo ratings and tilt.")
+        print("   teams.py updated with Elo ratings and tilt.")
     else:
-        print("\n✓ Data refresh complete (--data-only, skipped Elo recompute).")
+        print("   (--data-only, skipped Elo recompute)")
+
+    print("⑥ Fetching bookmaker odds …", end=" ", flush=True)
+    try:
+        import config as _cfg
+        from odds import fetch_wc_odds, save_odds
+        odds_df = fetch_wc_odds()
+        if not odds_df.empty:
+            save_odds(odds_df)
+            print(f"{len(odds_df)} match(es) with odds stored.")
+        else:
+            if not _cfg.ODDS_API_KEY:
+                print("skipped (ODDS_API_KEY not set — export ODDS_API_KEY=<your_key>)")
+            else:
+                print("no upcoming WC matches available yet from API.")
+    except Exception as exc:
+        print(f"warning: {exc}")
+
+    print("\n✓ Refresh complete.")
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────

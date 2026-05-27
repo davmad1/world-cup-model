@@ -9,7 +9,8 @@ Usage
     python simulate.py --matchup ARG BRA # print head-to-head win probability
 
 The model recreates and extends FiveThirtyEight's Soccer Power Index:
-  • Dynamic Elo ratings from 49 000+ historical matches (harmonic MOV, importance weights, altitude/distance HFA)
+  • Dynamic Elo ratings from 49 000+ historical matches (harmonic MOV,
+    importance weights, time decay, altitude/distance HFA)
   • Multiplicative xG model with tactical tilt (off × def / avg × goal_scalar)
   • Negative Binomial goal draws + Dixon-Coles low-score correction
   • Matchday-aware group schedule with final-day incentive modeling
@@ -22,6 +23,7 @@ The model recreates and extends FiveThirtyEight's Soccer Power Index:
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from collections import defaultdict
 
@@ -64,26 +66,63 @@ def run_simulation(n: int) -> dict[str, dict[str, float]]:
     return probs
 
 
-def print_results(probs: dict[str, dict[str, float]]) -> None:
-    """Print a sorted results table."""
+def _win_ci(p: float, n: int) -> float:
+    """95 % binomial confidence interval half-width (percentage points)."""
+    return 1.96 * math.sqrt(p * (1.0 - p) / n) * 100.0
+
+
+def print_results(
+    probs: dict[str, dict[str, float]],
+    n_sims: int,
+    winner_odds: dict[str, float] | None = None,
+) -> None:
+    """
+    Print a sorted results table.
+
+    Columns always shown: Team, Grp, SPI, Win%±CI, Final%, SF%, QF%, R16%, Adv%
+    Extra columns when winner odds are available: Mkt%, Edge
+    """
+    has_market = bool(winner_odds)
     rows = []
+
     for team, p in probs.items():
-        rows.append([
+        p_win = p["winner"]
+        ci    = _win_ci(p_win, n_sims)
+        win_str = f"{p_win*100:.1f}±{ci:.1f}%"
+
+        row = [
             team,
             TEAMS[team]["group"],
             f"{spi(team):.1f}",
-            f"{p['winner']*100:.1f}%",
+            win_str,
             f"{p['final']*100:.1f}%",
             f"{p['sf']*100:.1f}%",
             f"{p['qf']*100:.1f}%",
             f"{p['r16']*100:.1f}%",
             f"{p['r32']*100:.1f}%",
-        ])
+        ]
 
-    rows.sort(key=lambda r: float(r[3].rstrip("%")), reverse=True)
+        if has_market:
+            mkt = (winner_odds or {}).get(team)
+            if mkt is not None:
+                edge = (p_win - mkt) * 100
+                row += [f"{mkt*100:.1f}%", f"{edge:+.1f}pp"]
+            else:
+                row += ["—", "—"]
 
-    headers = ["Team", "Grp", "SPI", "Win%", "Final%", "SF%", "QF%", "R16%", "Adv%"]
+        rows.append(row)
+
+    rows.sort(key=lambda r: float(r[3].split("±")[0].rstrip("%")), reverse=True)
+
+    headers = ["Team", "Grp", "SPI", "Win%±CI", "Final%", "SF%", "QF%", "R16%", "Adv%"]
+    if has_market:
+        headers += ["Mkt%", "Edge"]
+
     print("\n" + tabulate(rows, headers=headers, tablefmt="simple"))
+    print(f"  CI = 95% binomial interval (sampling uncertainty, n={n_sims:,})")
+    if has_market:
+        print("  Mkt% = bookmaker implied win probability (overround removed)")
+        print("  Edge = model − market (positive → we're higher than market)")
 
 
 def print_group_probs(probs: dict[str, dict[str, float]]) -> None:
@@ -140,11 +179,20 @@ def main() -> None:
 
     print(f"\n2026 FIFA World Cup — SPI Prediction Model (n={args.n:,})")
     print("=" * 60)
-    print("Model: NB xG + Dixon-Coles + tilt + incentives + ET + penalties")
+    print("Model: NB xG + Dixon-Coles + tilt + decay + incentives + ET + penalties")
     print("Groups sourced from openfootball/worldcup.json (official draw).\n")
 
+    # Load bookmaker winner odds if available
+    try:
+        from odds import load_winner_odds
+        winner_odds: dict[str, float] | None = load_winner_odds() or None
+        if winner_odds:
+            print(f"  Market odds loaded for {len(winner_odds)} teams (data/winner_odds.csv)")
+    except Exception:
+        winner_odds = None
+
     probs = run_simulation(args.n)
-    print_results(probs)
+    print_results(probs, args.n, winner_odds=winner_odds)
 
     if args.group_probs:
         print_group_probs(probs)
@@ -153,7 +201,9 @@ def main() -> None:
     top5 = sorted(TEAMS, key=lambda t: probs[t]["winner"], reverse=True)[:5]
     print("\nTop-5 favourites to win:")
     for i, t in enumerate(top5, 1):
-        print(f"  {i}. {t:15s}  {probs[t]['winner']*100:.1f}%")
+        p = probs[t]["winner"]
+        ci = _win_ci(p, args.n)
+        print(f"  {i}. {t:20s}  {p*100:.1f}% ± {ci:.1f}pp")
 
 
 if __name__ == "__main__":

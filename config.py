@@ -8,6 +8,8 @@ the effect immediately. Use explain.py --sensitivity to sweep a range.
 All parameters are grouped by subsystem with inline commentary.
 """
 
+import os
+
 # ── Elo engine ────────────────────────────────────────────────────────────────
 
 # Base K-factor — how much each match moves ratings.
@@ -18,6 +20,23 @@ ELO_K_BASE: float = 40.0
 # Number of matches before a team leaves the "provisional" period.
 # During provisional, K is doubled to allow fast convergence from the 1500 prior.
 PROVISIONAL_MATCHES: int = 100
+
+# Time-decay half-life for Elo K-factor (Rue & Salvesen 2000).
+# A match played N days ago has its K scaled by exp(-ln(2) * N / HALFLIFE).
+# 0 = disabled (no decay). Any positive integer = halflife in days.
+#
+# Calibrated via `python calibrate.py --decay` across 2006-2022 WC group stages:
+#   halflife=   0d → RPS 0.20909  ← optimal (no decay)
+#   halflife= 730d → RPS 0.22718
+#   halflife=1460d → RPS 0.22335
+#   halflife=2920d → RPS 0.21880
+#   halflife=3650d → RPS 0.21740
+#   halflife=∞     → RPS 0.20943
+#
+# Conclusion: chronological Elo accumulation already handles recency adequately
+# for international football (far fewer matches per year than club football).
+# Explicit decay hurts at all tested halflives. Set > 0 only to experiment.
+ELO_DECAY_HALFLIFE_DAYS: int = 0
 
 # ── Home advantage components ─────────────────────────────────────────────────
 
@@ -45,6 +64,8 @@ DISTANCE_CAP: float = 60.0
 # Applied to K when updating ratings. Friendlies matter less; WC matches most.
 # The strings are matched case-insensitively against the tournament name in
 # results.csv (martj42). Add or adjust rows here — no code changes needed.
+# Initial values are informed guesses; calibrate empirically via:
+#   python calibrate.py --weights
 IMPORTANCE: dict[str, float] = {
     "friendly":                        0.50,
     "nations league":                  0.80,
@@ -174,3 +195,10 @@ CARDS_OVERDISPERSION: float = 0.8
 
 # Better teams (higher SPI) commit fewer fouls. Elo-point reduction per card.
 CARDS_ELO_SLOPE: float = 0.10
+
+# ── Bookmaker odds ────────────────────────────────────────────────────────────
+
+# The Odds API key (https://the-odds-api.com — free tier, 500 req/month).
+# Set the ODDS_API_KEY environment variable before running refresh.py.
+# If empty, the odds fetch step is silently skipped.
+ODDS_API_KEY: str = os.getenv("ODDS_API_KEY", "")

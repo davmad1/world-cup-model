@@ -61,10 +61,11 @@ def load_current_teams() -> dict[str, dict]:
 
 # ── Rating computation ────────────────────────────────────────────────────────
 
-def compute_ratings(df: pd.DataFrame) -> tuple[dict[str, float], pd.DataFrame]:
+def compute_ratings(df: pd.DataFrame, decay: bool = True) -> tuple[dict[str, float], pd.DataFrame]:
     """Run Elo on the full historical dataset and return final ratings."""
-    print("Computing Elo ratings …")
-    ratings, history = compute_elo(df, verbose=True)
+    decay_label = f"decay halflife={config.ELO_DECAY_HALFLIFE_DAYS}d" if decay else "no decay"
+    print(f"Computing Elo ratings ({decay_label}) …")
+    ratings, history = compute_elo(df, verbose=True, decay=decay)
     n = len(ratings)
     print(f"Done. Rated {n} teams.")
     return ratings, history
@@ -259,6 +260,8 @@ def main() -> None:
                         help="Print ASCII Elo history for one team and exit")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print changes without writing to teams.py")
+    parser.add_argument("--no-decay", action="store_true",
+                        help="Disable time decay on K-factor (for ablation comparison)")
     args = parser.parse_args()
 
     df = load_results()
@@ -271,7 +274,7 @@ def main() -> None:
         if abs(disp - config.OVERDISPERSION) > 0.01:
             print("  → Consider updating config.OVERDISPERSION")
 
-    ratings, history = compute_ratings(df)
+    ratings, history = compute_ratings(df, decay=not args.no_decay)
 
     if args.history:
         show_history(history, args.history)

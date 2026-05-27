@@ -342,12 +342,20 @@ def compute_elo(
     matches_df: pd.DataFrame,
     init_elo: float = 1_500.0,
     verbose: bool = False,
+    decay: bool = True,
 ) -> tuple[dict[str, float], pd.DataFrame]:
     """
     Compute Elo ratings by processing *matches_df* chronologically.
 
     Expected columns: date, home_team, away_team, home_score, away_score,
                       tournament, city, country, neutral (bool or "TRUE"/"FALSE")
+
+    Parameters
+    ----------
+    decay : bool
+        If True (default), apply exponential time-decay to the K-factor so that
+        older matches contribute less.  The half-life is config.ELO_DECAY_HALFLIFE_DAYS
+        (default 1 460 days = 4 years).  Set False for ablation/comparison.
 
     Returns
     -------
@@ -366,6 +374,10 @@ def compute_elo(
     # Normalise neutral column
     if df["neutral"].dtype == object:
         df["neutral"] = df["neutral"].str.upper() == "TRUE"
+
+    # Reference date for time-decay (most recent match in the dataset = "now")
+    _LN2 = math.log(2)
+    reference_date = df["date"].max()
 
     for _, row in df.iterrows():
         home_raw = str(row["home_team"])
@@ -410,9 +422,14 @@ def compute_elo(
         else:
             actual_home, actual_away = 0.5, 0.5
 
-        # K-factor: base × importance × provisional multiplier × harmonic scale
+        # K-factor: base × importance × decay × provisional multiplier × harmonic scale
         imp  = importance_weight(str(row.get("tournament", "")))
-        k_base = config.ELO_K_BASE * imp
+        if decay and config.ELO_DECAY_HALFLIFE_DAYS > 0:
+            days_ago = max(0, (reference_date - row["date"]).days)
+            decay_factor = math.exp(-_LN2 * days_ago / config.ELO_DECAY_HALFLIFE_DAYS)
+        else:
+            decay_factor = 1.0
+        k_base = config.ELO_K_BASE * imp * decay_factor
 
         k_home = k_base * (2.0 if match_count[home] < config.PROVISIONAL_MATCHES else 1.0)
         k_away = k_base * (2.0 if match_count[away] < config.PROVISIONAL_MATCHES else 1.0)
