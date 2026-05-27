@@ -217,7 +217,9 @@ def fetch_openfootball_wc() -> pd.DataFrame:
 
 def _match_key(df: pd.DataFrame) -> pd.Series:
     """Unique key: date + sorted team names (handles home/away order differences)."""
-    t1 = df[["home_team", "away_team"]].apply(lambda r: tuple(sorted([r[0], r[1]])), axis=1)
+    t1 = df[["home_team", "away_team"]].apply(
+        lambda r: tuple(sorted([r["home_team"], r["away_team"]])), axis=1
+    )
     return df["date"].astype(str) + "|" + t1.apply(lambda t: f"{t[0]}|{t[1]}")
 
 
