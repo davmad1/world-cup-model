@@ -53,9 +53,10 @@ ESPN_SCOREBOARD = (
     "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard"
 )
 
-# 2026 World Cup date range
-WC_START = date(2026, 6, 11)
-WC_END   = date(2026, 7, 19)
+# 2026 World Cup date range and total match count (12 groups × 6 + 32 + 16 + 8 + 4 + 2 + 1)
+WC_START          = date(2026, 6, 11)
+WC_END            = date(2026, 7, 19)
+WC_TOTAL_MATCHES  = 104
 
 # Timeout for HTTP requests (seconds)
 HTTP_TIMEOUT = 20
@@ -279,7 +280,7 @@ def show_status() -> None:
     print(f"  Date range:     {df['date'].min().date()} → {df['date'].max().date()}")
     wc26 = df[df["tournament"] == "FIFA World Cup"]
     wc26_done = wc26[wc26["date"] >= pd.Timestamp(WC_START)]
-    print(f"  2026 WC played: {len(wc26_done)} / 104 matches")
+    print(f"  2026 WC played: {len(wc26_done)} / {WC_TOTAL_MATCHES} matches")
     if not wc26_done.empty:
         print(f"\n  Most recent 5 results:")
         recent = wc26_done.sort_values("date").tail(5)

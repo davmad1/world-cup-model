@@ -15,7 +15,6 @@ Usage
 from __future__ import annotations
 
 import argparse
-import ast
 import os
 import re
 import sys
@@ -52,21 +51,17 @@ def load_results(path: Path = RESULTS_CSV) -> pd.DataFrame:
 # ── Current teams in teams.py ─────────────────────────────────────────────────
 
 def load_current_teams() -> dict[str, dict]:
-    """
-    Parse the TEAMS dict from teams.py without importing it
-    (avoids circular issues when we overwrite the file).
-    """
-    src = TEAMS_PY.read_text()
-    # Extract the TEAMS = { ... } block
-    m = re.search(r"TEAMS[^=]*=\s*(\{.*?\})\s*\n\n", src, re.DOTALL)
-    if not m:
-        sys.exit("Could not parse TEAMS dict from teams.py")
-    return ast.literal_eval(m.group(1))
+    """Load the TEAMS dict from teams.py via direct module import."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("teams", TEAMS_PY)
+    mod  = importlib.util.module_from_spec(spec)       # type: ignore[arg-type]
+    spec.loader.exec_module(mod)                        # type: ignore[union-attr]
+    return dict(mod.TEAMS)
 
 
 # ── Rating computation ────────────────────────────────────────────────────────
 
-def compute_ratings(df: pd.DataFrame) -> dict[str, float]:
+def compute_ratings(df: pd.DataFrame) -> tuple[dict[str, float], pd.DataFrame]:
     """Run Elo on the full historical dataset and return final ratings."""
     print("Computing Elo ratings …")
     ratings, history = compute_elo(df, verbose=True)

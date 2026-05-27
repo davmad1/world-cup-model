@@ -29,8 +29,11 @@ HOME_ADV_BASE: float = 75.0
 # Above this, a nonlinear exponential kicker is applied.
 ALTITUDE_KNEE: float = 1_500.0
 
-# Altitude boost coefficient. Scales the exponential term above ALTITUDE_KNEE.
-# Calibrated so La Paz (~3 640 m) earns ~170 extra Elo points of HFA.
+# Altitude boost coefficient. Scales the quadratic term above ALTITUDE_KNEE.
+# At COEFF=60 the actual values produced are:
+#   Mexico City (2 240 m) → ~33 pts,  Bogotá (2 600 m) → ~73 pts
+#   Quito       (2 850 m) → ~109 pts, La Paz (3 640 m) → ~275 pts
+# Lower to ~38 for a softer altitude effect (La Paz → ~174 pts).
 ALTITUDE_COEFF: float = 60.0
 
 # Distance-based HFA: each 1 000 km the away team must travel adds this many

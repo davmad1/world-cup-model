@@ -34,13 +34,12 @@ TEAM_NAME_MAP: dict[str, str] = {
     # CONMEBOL
     # (most names match)
     # UEFA
-    "Czech Republic":           "Czech Republic",
     "Czechia":                  "Czech Republic",
+    "Bosnia and Herzegovina":   "Bosnia & Herzegovina",
     "Bosnia-Herzegovina":       "Bosnia & Herzegovina",
     "Bosnia Herzegovina":       "Bosnia & Herzegovina",
     "Türkiye":                  "Turkey",
     # Africa
-    "Ivory Coast":              "Ivory Coast",
     "Côte d'Ivoire":            "Ivory Coast",
     "Cote d'Ivoire":            "Ivory Coast",
     "Congo DR":                 "DR Congo",
@@ -58,7 +57,6 @@ TEAM_NAME_MAP: dict[str, str] = {
     "Swaziland":                "Eswatini",
     "Macedonia":                "North Macedonia",
     "FYR Macedonia":            "North Macedonia",
-    "North Macedonia":          "North Macedonia",
 }
 
 # Teams to skip entirely (B-teams, defunct states we don't track).
@@ -183,11 +181,12 @@ def altitude_boost(altitude_m: float) -> float:
     Extra HFA Elo points due to altitude.
 
     Below ALTITUDE_KNEE (1 500 m) — negligible.
-    Above that, exponential growth calibrated so:
-        La Paz  (3 640 m) → ~175 points
-        Quito   (2 850 m) → ~ 90 points
-        Bogotá  (2 600 m) → ~ 55 points
-        Mexico City (2 240 m) → ~ 25 points
+    Above that, quadratic growth. At the default ALTITUDE_COEFF=60:
+        La Paz      (3 640 m) → ~275 pts
+        Quito       (2 850 m) → ~109 pts
+        Bogotá      (2 600 m) → ~ 73 pts
+        Mexico City (2 240 m) → ~ 33 pts
+    Tune ALTITUDE_COEFF in config.py to adjust the overall magnitude.
     """
     excess = max(0.0, altitude_m - config.ALTITUDE_KNEE)
     if excess == 0:
@@ -252,6 +251,7 @@ COUNTRY_COORDS: dict[str, tuple[float, float]] = {
     "Turkey":             (39.9, 32.9),
     "Uruguay":            (-34.9, -56.2),
     "USA":                (38.9, -77.0),
+    "United States":      (38.9, -77.0),   # martj42 country column uses this form
     "Uzbekistan":         (41.3, 69.2),
     # Additional commonly-seen teams
     "Chile":              (-33.5, -70.7),
@@ -277,7 +277,6 @@ COUNTRY_COORDS: dict[str, tuple[float, float]] = {
     "Venezuela":          (10.5, -66.9),
     "Wales":              (51.5, -3.2),
     "Bolivia":            (-16.5, -68.1),
-    "Ecuador":            (-0.2, -78.5),
 }
 
 
@@ -427,11 +426,11 @@ def compute_elo(
         match_count[home] += 1
         match_count[away] += 1
 
-        if verbose and len(history_rows) % 5_000 == 0:
-            print(f"  processed {len(history_rows):,} matches …")
-
         history_rows.append({"date": row["date"], "home": home, "away": away,
                               "elo_home": ratings[home], "elo_away": ratings[away]})
+
+        if verbose and len(history_rows) % 5_000 == 0:
+            print(f"  processed {len(history_rows):,} matches …")
 
     history = pd.DataFrame(history_rows)
     return ratings, history
@@ -449,10 +448,10 @@ def elo_to_off_def(elo: float) -> tuple[float, float]:
     Calibration (scale = 0.50, avg_elo = 1 500):
         Elo   off    def    SPI
         1500  1.40   1.40   50.0   (average international team)
-        1700  1.72   1.14   60.2
-        1900  2.09   0.94   69.0
-        2070  2.48   0.79   75.8   (≈ Argentina post-2022)
-        1300  1.05   1.87   36.0   (very weak)
+        1700  1.80   1.09   62.3
+        1900  2.31   0.85   73.1
+        2070  2.86   0.69   80.6   (≈ Argentina post-2022)
+        1300  1.09   1.80   37.7   (very weak)
     """
     norm = (elo - config.ELO_AVG) / 400.0 * config.ELO_GOALS_SCALE
     off  = config.LEAGUE_AVG * math.exp(norm)
