@@ -1,6 +1,6 @@
 # 2026 FIFA World Cup Prediction Model
 
-A bespoke Monte Carlo prediction engine for the 2026 FIFA World Cup (USA / Canada / Mexico, 48 teams, 104 matches). Built from first principles, drawing on published academic literature and practitioner models — not a port of any single existing system.
+A Monte Carlo prediction engine for the 2026 FIFA World Cup (USA / Canada / Mexico, 48 teams, 104 matches). Combining methodology from published academic literature and practitioner models.
 
 > **Current top-5 (n=50,000 simulations, updated May 2026)**
 > Spain 15.3% · Argentina 7.7% · France 6.8% · England 4.9% · Brazil 4.6%
@@ -315,6 +315,28 @@ The model beats the naive baseline by ~9% on RPS. Tilt and Dixon-Coles improve s
 - **Rue & Salvesen (2000)** — "Prediction and Retrospective Analysis of Soccer Matches in a League" — time-varying Elo, negative binomial overdispersion
 - **Hvattum & Arntzen (2010)** — "Using ELO ratings for match result prediction in association football" — establishes Elo as a competitive match predictor for international football
 - **Silver, N. (2022)** — [PELE model](https://www.natesilver.net/p/pele-international-football-rankings-soccer-ratings-projections) — match importance weighting, tilt concept, group-incentive modeling
+
+---
+
+## Known limitations & future work
+
+### Defensive tilt (Morocco 2022, Greece Euro 2004)
+
+The current tilt model captures *offensive* style residuals well — teams that consistently score above their xG expectation. It does not separately weight **defensive outperformance** (goals-conceded vs. xGA). Morocco 2022 is the canonical example: they conceded only 0.14 xG/90 actual while facing ~1.0 xGA per game — four clean sheets driven by structural defensive shape, not luck. The model's tilt residual is symmetric and shrunk heavily (TILT_TACTICAL_SHRINK = 0.20), so it partially captures this but under-weights it.
+
+**Proposed fix**: split `tilt` into `off_tilt` (goals scored vs. xGF residual) and `def_tilt` (goals conceded vs. xGA residual). Apply a tournament-context multiplier to `def_tilt` — defensive organisations are more replicable across 7 games than offensive inspiration, especially for underdogs.
+
+### Calibration bias in importance weights
+
+The unconstrained optimiser always finds a corner solution (WC weight → max, everything else → min). This is a real empirical signal, but it's biased by the 5-WC sample size and the dominance of ~15 historically elite teams. After 2026 adds a sixth tournament, re-run `calibrate.py --weights` — a less biased estimate should emerge once the sample includes more varied qualifiers.
+
+### Player and squad quality signal
+
+The model has the infrastructure for squad-value blending (`ELO_SQUAD_BLEND = 0.35`, Transfermarkt values, age trajectory) but this blend is not yet validated against held-out data. The challenge: player quality data is club-based (FBref, Transfermarkt) while Elo is international-match-based. A proper integration would require mapping club ratings to international context — substantial rebuild, potentially high value for tournaments with late squad changes (injuries, call-offs).
+
+### Bookmaker odds comparison
+
+`evaluate.py --vs-538` is stubbed but 538 stopped publishing models after 2023. The next best benchmark is bookmaker-implied probabilities for 2026 group-stage matches (available once the tournament starts). The pipeline is ready (`odds.py`, `data/odds.csv`); the comparison will be live-updated during the tournament.
 
 ---
 
